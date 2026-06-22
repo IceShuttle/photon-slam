@@ -104,7 +104,7 @@ fn main() {
         memory_allocator.clone(),
         ImageCreateInfo {
             image_type: ImageType::Dim2d,
-            format: Format::R8G8B8A8_UNORM,
+            format: Format::R8G8B8A8_SRGB,
             extent: [width, height, 1],
             usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
             ..Default::default()

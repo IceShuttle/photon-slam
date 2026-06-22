@@ -1,19 +1,21 @@
 use std::sync::Arc;
 use vulkano::VulkanLibrary;
-use vulkano::command_buffer::ClearColorImageInfo;
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo, QueueFlags};
-use vulkano::format::ClearColorValue;
 use vulkano::format::Format;
 use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::sync::{self, GpuFuture};
+use image::GenericImageView;
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
+use vulkano::command_buffer::CopyBufferToImageInfo;
 
+/// Prints the Device and API information
 fn print_info(physical_device: &PhysicalDevice) {
     println!("API Version: {}", physical_device.api_version());
     println!(
@@ -79,12 +81,31 @@ fn main() {
         device.clone(),
         StandardCommandBufferAllocatorCreateInfo::default(),
     ));
+    let img = image::open("cat.jpg").expect("failed to load cat.jpg");
+    let (width, height) = img.dimensions();
+    let rgba = img.to_rgba8().into_raw();
+
+    let staging_buffer = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::TRANSFER_SRC,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        rgba,
+    )
+    .expect("failed to create staging buffer");
+
     let image = Image::new(
         memory_allocator.clone(),
         ImageCreateInfo {
             image_type: ImageType::Dim2d,
             format: Format::R8G8B8A8_UNORM,
-            extent: [1024, 1024, 1],
+            extent: [width, height, 1],
             usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
             ..Default::default()
         },
@@ -93,7 +114,7 @@ fn main() {
             ..Default::default()
         },
     )
-    .expect("Unable to create an Image");
+    .expect("failed to create image");
     println!("Image Created");
 
     let mut builder = AutoCommandBufferBuilder::primary(
@@ -104,10 +125,10 @@ fn main() {
     .unwrap();
 
     builder
-        .clear_color_image(ClearColorImageInfo {
-            clear_value: ClearColorValue::Float([0.0, 0.0, 1.0, 1.0]),
-            ..ClearColorImageInfo::image(image.clone())
-        })
+        .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+            staging_buffer,
+            image.clone(),
+        ))
         .unwrap();
     let command_buffer = builder.build().unwrap();
     println!("Command Buffer Created");
@@ -117,7 +138,7 @@ fn main() {
         .unwrap()
         .flush()
         .unwrap();
-    println!("Image Cleared");
+    println!("Image Uploaded");
 
     println!("Success");
 }

@@ -1,5 +1,8 @@
+use image::GenericImageView;
 use std::sync::Arc;
 use vulkano::VulkanLibrary;
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
+use vulkano::command_buffer::CopyBufferToImageInfo;
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
@@ -11,9 +14,6 @@ use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::sync::{self, GpuFuture};
-use image::GenericImageView;
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
-use vulkano::command_buffer::CopyBufferToImageInfo;
 
 /// Prints the Device and API information
 fn print_info(physical_device: &PhysicalDevice) {

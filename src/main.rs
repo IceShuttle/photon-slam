@@ -34,7 +34,7 @@ fn main() {
     println!("Starting...");
 
     let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new().expect("Cannot create winit init loop");
 
     let surface_extensions = Surface::required_extensions(&event_loop).unwrap();
     let instance_extensions = InstanceExtensions {
@@ -118,10 +118,13 @@ fn main() {
         .unwrap();
 
     let present_mode = if present_modes.contains(&swapchain::PresentMode::Mailbox) {
+        println!("Using Mailbox PresentMode");
         swapchain::PresentMode::Mailbox
     } else if present_modes.contains(&swapchain::PresentMode::Immediate) {
+        println!("Using Immediate PresentMode");
         swapchain::PresentMode::Immediate
     } else {
+        println!("Using FIFO PresentMode");
         swapchain::PresentMode::Fifo
     };
 
@@ -154,7 +157,7 @@ fn main() {
     // Load JPEG and upload to GPU
     let img = image::open("cat.jpg").expect("failed to load cat.jpg");
     let (width, height) = img.dimensions();
-    let rgba = img.to_rgba8().into_raw();
+    let rgba = img.to_rgba8().into_raw(); // Converting compressed image to raw RGBA channel
 
     let staging_buffer = Buffer::from_iter(
         memory_allocator.clone(),

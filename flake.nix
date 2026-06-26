@@ -72,6 +72,7 @@
       checks = self.checks.${system};
       packages = libs++[
         pkgs.shader-slang
+        pkgs.rust-analyzer
       ];
       shellHook = ''
           export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH;

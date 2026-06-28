@@ -18,7 +18,7 @@
   }:
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = import nixpkgs {inherit system;};
-      craneLib = crane.mkLib pkgs;
+      craneLib = (crane.mkLib nixpkgs.legacyPackages.${system}).overrideToolchain fenix.packages.${system}.stable.toolchain;
       fenixPkgs = fenix.packages.${system};
 
       libs = with pkgs; [

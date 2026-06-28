@@ -1,5 +1,6 @@
 use image::GenericImageView;
 use std::sync::Arc;
+use vulkano::VulkanLibrary;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
@@ -16,7 +17,6 @@ use vulkano::swapchain::{
     self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
 };
 use vulkano::sync::{self, GpuFuture};
-use vulkano::VulkanLibrary;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::WindowAttributes;

@@ -26,6 +26,9 @@
         wayland
         libGL
         vulkan-loader
+        libX11
+        libXcursor
+        libXi
       ];
 
       rustToolchain = fenixPkgs.stable.toolchain;
@@ -90,6 +93,7 @@
           libs
           ++ [
             rustToolchain
+            pkgs.bacon
             pkgs.shader-slang
             pkgs.rust-analyzer
           ];

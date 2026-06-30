@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
+use vulkano::image::view::ImageView;
 use vulkano::image::{Image, ImageUsage};
 use vulkano::instance::Instance;
 use vulkano::swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo};
@@ -16,7 +17,7 @@ pub struct App {
     surface: Option<Arc<Surface>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    image: Option<Image>,
+    image: Arc<ImageView>,
 }
 impl App {
     pub fn new(
@@ -24,6 +25,7 @@ impl App {
         physical_device: Arc<PhysicalDevice>,
         device: Arc<Device>,
         queue: Arc<Queue>,
+        image: Arc<ImageView>,
     ) -> Self {
         Self {
             instance,
@@ -32,7 +34,7 @@ impl App {
             physical_device,
             device,
             queue,
-            image: None,
+            image,
         }
     }
 }

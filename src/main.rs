@@ -176,6 +176,6 @@ fn main() {
         println!("Image uploaded");
     }
     event_loop.set_control_flow(event_loop::ControlFlow::Poll);
-    let mut app = window::App::new(instance, physical_device, device, queue);
+    let mut app = window::App::new(instance, physical_device, device, queue, texture);
     event_loop.run_app(&mut app).unwrap();
 }

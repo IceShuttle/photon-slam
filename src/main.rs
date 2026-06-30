@@ -1,9 +1,30 @@
-use vulkano::VulkanLibrary;
+use std::sync::Arc;
+
+use image::ImageReader;
+use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer};
+use vulkano::command_buffer::{
+    AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferToImageInfo,
+    allocator::StandardCommandBufferAllocator,
+};
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags};
+use vulkano::format::Format;
+use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
+use vulkano::pipeline::graphics::vertex_input::Vertex;
 use vulkano::swapchain::Surface;
+use vulkano::sync::{self, GpuFuture};
+use vulkano::{DeviceSize, VulkanLibrary};
 use winit::event_loop::{self, EventLoop};
 mod window;
+
+#[derive(BufferContents, Vertex)]
+#[repr(C)]
+struct Vertex2D {
+    #[format(R32G32_SFLOAT)]
+    position: [f32; 2],
+}
 
 fn main() {
     println!("Starting...");
@@ -33,6 +54,8 @@ fn main() {
         .next()
         .expect("no devices available");
 
+    photon_slam::print_info(&physical_device);
+
     let queue_family_index = physical_device
         .queue_family_properties()
         .iter()
@@ -54,11 +77,104 @@ fn main() {
         },
     )
     .expect("failed to create device");
+
     let queue = queues.next().unwrap();
+
+    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+    let desc_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+        device.clone(),
+        Default::default(),
+    ));
+    let cmd_buff_allocator = Arc::new(StandardCommandBufferAllocator::new(
+        device.clone(),
+        Default::default(),
+    ));
+
     println!("Vulkan Initialized");
 
-    photon_slam::print_info(&physical_device);
+    let vertices = [
+        Vertex2D {
+            position: [-1.0, 1.0],
+        },
+        Vertex2D {
+            position: [3.0, 1.0],
+        },
+        Vertex2D {
+            position: [-1.0, -3.0],
+        },
+    ];
 
+    let vertex_buffer = Buffer::from_iter(
+        memory_allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::VERTEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        vertices,
+    )
+    .unwrap();
+    println!("Created Vertex Buffer");
+
+    let mut uploads = AutoCommandBufferBuilder::primary(
+        cmd_buff_allocator.clone(),
+        queue_family_index,
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .unwrap();
+
+    let texture = {
+        let img = ImageReader::open("cat.jpg").unwrap().decode().unwrap();
+        let buffer_size = (img.width() * img.height() * 4) as DeviceSize;
+        let upload_buffer: Subbuffer<[u8]> = Buffer::new_slice(
+            memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            buffer_size,
+        )
+        .unwrap();
+
+        let image = Image::new(
+            memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::R8G8B8A8_SRGB,
+                extent: [img.width(), img.height(), 1],
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                ..Default::default()
+            },
+            AllocationCreateInfo::default(),
+        )
+        .unwrap();
+
+        uploads
+            .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+                upload_buffer,
+                image.clone(),
+            ))
+            .unwrap();
+        ImageView::new_default(image).unwrap()
+    };
+    {
+        let cmd_buff = uploads.build().unwrap();
+        sync::now(device.clone())
+            .then_execute(queue.clone(), cmd_buff)
+            .unwrap()
+            .flush()
+            .unwrap();
+        println!("Image uploaded");
+    }
     event_loop.set_control_flow(event_loop::ControlFlow::Poll);
     let mut app = window::App::new(instance, physical_device, device, queue);
     event_loop.run_app(&mut app).unwrap();

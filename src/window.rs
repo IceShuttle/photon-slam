@@ -1,15 +1,13 @@
 use std::sync::Arc;
-use vulkano::buffer::BufferContents;
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
-use vulkano::image::ImageUsage;
+use vulkano::image::{Image, ImageUsage};
 use vulkano::instance::Instance;
-use vulkano::pipeline::graphics::vertex_input::Vertex;
 use vulkano::swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{self, Window, WindowId};
+use winit::window::{Window, WindowId};
 
 pub struct App {
     instance: Arc<Instance>,
@@ -18,6 +16,7 @@ pub struct App {
     surface: Option<Arc<Surface>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
+    image: Option<Image>,
 }
 impl App {
     pub fn new(
@@ -33,6 +32,7 @@ impl App {
             physical_device,
             device,
             queue,
+            image: None,
         }
     }
 }
@@ -89,8 +89,9 @@ impl ApplicationHandler for App {
             },
         )
         .unwrap();
+        println!("Swapchain Initialized!");
 
-        println!("{:?}", swapchain);
+        // println!("{:?}", swapchain);
 
         self.window = Some(window);
         self.surface = Some(surface);
@@ -103,6 +104,10 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
+                // match self.window.as_ref().unwrap().is_visible() {
+                //     Some(val) => println!("{val}!"),
+                //     None => println!("Wayland Magic!"),
+                // }
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),

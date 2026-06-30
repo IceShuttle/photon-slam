@@ -5,5 +5,5 @@ edition = "2024"
 
 [dependencies]
 vulkano = "0.35.2"
-winit = { version = "0.30.13", features = ["rwh_06"] }
+winit = "0.30.13"
 image = "0.25"

@@ -1,5 +1,5 @@
 use vulkano::VulkanLibrary;
-use vulkano::device::{Device, DeviceCreateInfo, QueueCreateInfo, QueueFlags};
+use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::swapchain::Surface;
 use winit::event_loop::{self, EventLoop};
@@ -12,6 +12,10 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
 
     let required_extensions = Surface::required_extensions(&event_loop).unwrap();
+    let device_extensions = DeviceExtensions {
+        khr_swapchain: true,
+        ..Default::default()
+    };
 
     let instance = Instance::new(
         library,
@@ -45,6 +49,7 @@ fn main() {
                 queue_family_index,
                 ..Default::default()
             }],
+            enabled_extensions: device_extensions,
             ..Default::default()
         },
     )
@@ -55,6 +60,6 @@ fn main() {
     photon_slam::print_info(&physical_device);
 
     event_loop.set_control_flow(event_loop::ControlFlow::Poll);
-    let mut app = window::App::new(instance);
+    let mut app = window::App::new(instance, physical_device, device, queue);
     event_loop.run_app(&mut app).unwrap();
 }

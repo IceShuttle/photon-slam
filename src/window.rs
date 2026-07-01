@@ -38,7 +38,6 @@ pub struct App {
 
 pub struct RenderContext {
     window: Arc<Window>,
-    surface: Arc<Surface>,
     swapchain: Arc<Swapchain>,
     swapchain_images: Vec<Arc<Image>>,
 }
@@ -233,7 +232,6 @@ impl ApplicationHandler for App {
             swapchain,
             swapchain_images,
             window,
-            surface,
         });
     }
 

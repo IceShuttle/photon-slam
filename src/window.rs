@@ -1,28 +1,30 @@
 use std::sync::Arc;
-use vulkano::command_buffer::allocator::CommandBufferAllocator;
-use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage};
-use vulkano::device::physical::PhysicalDevice;
-use vulkano::device::{Device, Queue};
-use vulkano::format::Format;
-use vulkano::image::{Image, ImageUsage};
-use vulkano::instance::Instance;
-use vulkano::swapchain::{
-    self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
-};
-use vulkano::sync::GpuFuture;
-use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::window::{Window, WindowId};
 
-use vulkano::VulkanLibrary;
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
-use vulkano::command_buffer::{CopyBufferToImageInfo, allocator::StandardCommandBufferAllocator};
-use vulkano::device::{DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags};
-use vulkano::image::{ImageCreateInfo, ImageType};
-use vulkano::instance::{InstanceCreateFlags, InstanceCreateInfo};
-use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
-use vulkano::sync::{self};
+use vulkano::{
+    VulkanLibrary,
+    buffer::{Buffer, BufferCreateInfo, BufferUsage},
+    command_buffer::{
+        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyBufferToImageInfo,
+        allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
+    },
+    device::{
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDevice,
+    },
+    format::Format,
+    image::{Image, ImageCreateInfo, ImageType, ImageUsage},
+    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo},
+    sync::{self, GpuFuture},
+};
+
+use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowId},
+};
 
 pub struct App {
     instance: Arc<Instance>,

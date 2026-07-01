@@ -1,15 +1,11 @@
 use std::sync::Arc;
 use vulkano::command_buffer::allocator::CommandBufferAllocator;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage};
-use vulkano::descriptor_set::allocator::DescriptorSetAllocator;
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
-use vulkano::image::{Image, ImageUsage, sampler::Sampler, view::ImageView};
+use vulkano::image::{Image, ImageUsage, view::ImageView};
 use vulkano::instance::Instance;
-use vulkano::swapchain::{
-    self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
-    acquire_next_image,
-};
+use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -24,7 +20,6 @@ pub struct App {
     device: Arc<Device>,
     queue: Arc<Queue>,
     image: Arc<ImageView>,
-    desc_set_allocator: Arc<dyn DescriptorSetAllocator>,
     swapchain: Option<Arc<Swapchain>>,
     swapchain_images: Option<Vec<Arc<Image>>>,
     cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
@@ -36,7 +31,6 @@ impl App {
         device: Arc<Device>,
         queue: Arc<Queue>,
         image: Arc<ImageView>,
-        desc_set_allocator: Arc<dyn DescriptorSetAllocator>,
         swapchain: Option<Arc<Swapchain>>,
         swapchain_images: Option<Vec<Arc<Image>>>,
         cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
@@ -49,9 +43,8 @@ impl App {
             device,
             queue,
             image,
-            desc_set_allocator,
-            swapchain: None,
-            swapchain_images: None,
+            swapchain,
+            swapchain_images,
             cmd_buffer_allocator,
         }
     }
@@ -80,9 +73,6 @@ impl ApplicationHandler for App {
             .unwrap()[0]
             .0;
 
-        let present_mode =
-            photon_slam::get_present_mode(self.physical_device.clone(), surface.clone()).unwrap();
-
         let (swapchain, swapchain_images) = Swapchain::new(
             self.device.clone(),
             surface.clone(),
@@ -109,7 +99,7 @@ impl ApplicationHandler for App {
         self.surface = Some(surface);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
                 println!("The close button was pressed; stopping");

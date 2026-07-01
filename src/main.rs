@@ -1,34 +1,21 @@
 use std::sync::Arc;
 
 use image::ImageReader;
-use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer};
+use vulkano::VulkanLibrary;
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferToImageInfo,
     allocator::StandardCommandBufferAllocator,
 };
-use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags};
 use vulkano::format::Format;
-use vulkano::image::{
-    Image, ImageCreateInfo, ImageType, ImageUsage,
-    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo},
-    view::ImageView,
-};
+use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
-use vulkano::pipeline::graphics::vertex_input::Vertex;
 use vulkano::swapchain::Surface;
 use vulkano::sync::{self, GpuFuture};
-use vulkano::{DeviceSize, VulkanLibrary};
 use winit::event_loop::{self, EventLoop};
 mod window;
-
-#[derive(BufferContents, Vertex)]
-#[repr(C)]
-struct Vertex2D {
-    #[format(R32G32_SFLOAT)]
-    position: [f32; 2],
-}
 
 fn main() {
     println!("Starting...");
@@ -85,44 +72,13 @@ fn main() {
     let queue = queues.next().unwrap();
 
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
-    let desc_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
+
     let cmd_buff_allocator = Arc::new(StandardCommandBufferAllocator::new(
         device.clone(),
         Default::default(),
     ));
 
     println!("Vulkan Initialized");
-
-    let vertices = [
-        Vertex2D {
-            position: [-1.0, 1.0],
-        },
-        Vertex2D {
-            position: [3.0, 1.0],
-        },
-        Vertex2D {
-            position: [-1.0, -3.0],
-        },
-    ];
-
-    let vertex_buffer = Buffer::from_iter(
-        memory_allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::VERTEX_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-            ..Default::default()
-        },
-        vertices,
-    )
-    .unwrap();
-    println!("Created Vertex Buffer");
 
     let mut uploads = AutoCommandBufferBuilder::primary(
         cmd_buff_allocator.clone(),
@@ -133,7 +89,6 @@ fn main() {
 
     let texture = {
         let img = ImageReader::open("cat.jpg").unwrap().decode().unwrap();
-        let buffer_size = (img.width() * img.height() * 4) as DeviceSize;
         let upload_buffer = Buffer::from_iter(
             memory_allocator.clone(),
             BufferCreateInfo {
@@ -182,24 +137,13 @@ fn main() {
             .unwrap();
         println!("Image uploaded");
     }
-    // let sampler = Sampler::new(
-    //     device.clone(),
-    //     SamplerCreateInfo {
-    //         mag_filter: Filter::Linear,
-    //         min_filter: Filter::Linear,
-    //         address_mode: [SamplerAddressMode::Repeat; 3],
-    //         ..Default::default()
-    //     },
-    // )
-    // .unwrap();
-    // println!("{:?}", texture.image().memory());
+
     let mut app = window::App::new(
         instance,
         physical_device,
         device,
         queue,
         texture,
-        desc_set_allocator,
         None,
         None,
         cmd_buff_allocator,

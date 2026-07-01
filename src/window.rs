@@ -76,10 +76,7 @@ impl App {
         let queue_family_index = physical_device
             .queue_family_properties()
             .iter()
-            .position(|qfp| {
-                qfp.queue_flags
-                    .contains(QueueFlags::GRAPHICS & QueueFlags::COMPUTE)
-            })
+            .position(|qfp| qfp.queue_flags.contains(QueueFlags::COMPUTE))
             .expect("couldn't find a graphics queue family")
             as u32;
 

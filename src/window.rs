@@ -1,10 +1,16 @@
 use std::sync::Arc;
+use vulkano::command_buffer::allocator::CommandBufferAllocator;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage};
+use vulkano::descriptor_set::allocator::DescriptorSetAllocator;
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
-use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageUsage};
+use vulkano::image::{Image, ImageUsage, sampler::Sampler, view::ImageView};
 use vulkano::instance::Instance;
-use vulkano::swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo};
+use vulkano::swapchain::{
+    self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
+    acquire_next_image,
+};
+use vulkano::sync::GpuFuture;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
@@ -18,6 +24,10 @@ pub struct App {
     device: Arc<Device>,
     queue: Arc<Queue>,
     image: Arc<ImageView>,
+    desc_set_allocator: Arc<dyn DescriptorSetAllocator>,
+    swapchain: Option<Arc<Swapchain>>,
+    swapchain_images: Option<Vec<Arc<Image>>>,
+    cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
 }
 impl App {
     pub fn new(
@@ -26,6 +36,10 @@ impl App {
         device: Arc<Device>,
         queue: Arc<Queue>,
         image: Arc<ImageView>,
+        desc_set_allocator: Arc<dyn DescriptorSetAllocator>,
+        swapchain: Option<Arc<Swapchain>>,
+        swapchain_images: Option<Vec<Arc<Image>>>,
+        cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
     ) -> Self {
         Self {
             instance,
@@ -35,6 +49,10 @@ impl App {
             device,
             queue,
             image,
+            desc_set_allocator,
+            swapchain: None,
+            swapchain_images: None,
+            cmd_buffer_allocator,
         }
     }
 }
@@ -62,38 +80,30 @@ impl ApplicationHandler for App {
             .unwrap()[0]
             .0;
 
-        let present_modes = self
-            .physical_device
-            .surface_present_modes(&surface, SurfaceInfo::default())
-            .unwrap();
+        let present_mode =
+            photon_slam::get_present_mode(self.physical_device.clone(), surface.clone()).unwrap();
 
-        let present_mode = if present_modes.contains(&swapchain::PresentMode::Mailbox) {
-            println!("Using Mailbox PresentMode");
-            swapchain::PresentMode::Mailbox
-        } else if present_modes.contains(&swapchain::PresentMode::Immediate) {
-            println!("Using Immediate PresentMode");
-            swapchain::PresentMode::Immediate
-        } else {
-            println!("Using FIFO PresentMode");
-            swapchain::PresentMode::Fifo
-        };
-
-        let (mut swapchain, swapchain_images) = Swapchain::new(
+        let (swapchain, swapchain_images) = Swapchain::new(
             self.device.clone(),
             surface.clone(),
             SwapchainCreateInfo {
                 min_image_count: caps.min_image_count + 1, // How many buffers to use in the swapchain
                 image_format,
                 image_extent: dimensions.into(),
-                image_usage: ImageUsage::COLOR_ATTACHMENT, // What the images are going to be used for
+                image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST, // What the images are going to be used for
                 composite_alpha,
                 ..Default::default()
             },
         )
         .unwrap();
         println!("Swapchain Initialized!");
+        self.swapchain = Some(swapchain);
+        self.swapchain_images = Some(swapchain_images);
+
+        // let render_pass = vulkano::single_pass_renderpass!(self.device.clone(),);
 
         // println!("{:?}", swapchain);
+        // println!("Swapchain Size {}", swapchain_images.len());
 
         self.window = Some(window);
         self.surface = Some(surface);
@@ -110,6 +120,52 @@ impl ApplicationHandler for App {
                 //     Some(val) => println!("{val}!"),
                 //     None => println!("Wayland Magic!"),
                 // }
+                let result =
+                    swapchain::acquire_next_image(self.swapchain.as_ref().unwrap().clone(), None);
+
+                let (img_idx, _, acquire_future) = match result {
+                    Ok(val) => val,
+                    Err(_) => {
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                };
+                let mut present_builder = AutoCommandBufferBuilder::primary(
+                    self.cmd_buffer_allocator.clone(),
+                    self.queue.queue_family_index(),
+                    CommandBufferUsage::OneTimeSubmit,
+                )
+                .unwrap();
+
+                // let img = self.swapchain_images.unwrap();
+
+                present_builder
+                    .blit_image(BlitImageInfo::images(
+                        self.image.image().clone(),
+                        self.swapchain_images.as_ref().unwrap()[0].clone(),
+                    ))
+                    .unwrap();
+
+                let cmd = match present_builder.build() {
+                    Ok(val) => val,
+                    Err(_) => return,
+                };
+
+                let future = match acquire_future.then_execute(self.queue.clone(), cmd) {
+                    Ok(val) => val,
+                    Err(_) => return,
+                };
+
+                let _ = swapchain::present(
+                    future,
+                    self.queue.clone(),
+                    SwapchainPresentInfo::swapchain_image_index(
+                        self.swapchain.as_ref().unwrap().clone(),
+                        img_idx,
+                    ),
+                )
+                .then_signal_fence_and_flush();
+
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),

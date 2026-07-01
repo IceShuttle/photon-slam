@@ -9,7 +9,11 @@ use vulkano::command_buffer::{
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags};
 use vulkano::format::Format;
-use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView};
+use vulkano::image::{
+    Image, ImageCreateInfo, ImageType, ImageUsage,
+    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo},
+    view::ImageView,
+};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::pipeline::graphics::vertex_input::Vertex;
@@ -130,7 +134,7 @@ fn main() {
     let texture = {
         let img = ImageReader::open("cat.jpg").unwrap().decode().unwrap();
         let buffer_size = (img.width() * img.height() * 4) as DeviceSize;
-        let upload_buffer: Subbuffer<[u8]> = Buffer::new_slice(
+        let upload_buffer = Buffer::from_iter(
             memory_allocator.clone(),
             BufferCreateInfo {
                 usage: BufferUsage::TRANSFER_SRC,
@@ -141,7 +145,7 @@ fn main() {
                     | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
-            buffer_size,
+            img.to_rgba8().into_raw(),
         )
         .unwrap();
 
@@ -151,10 +155,13 @@ fn main() {
                 image_type: ImageType::Dim2d,
                 format: Format::R8G8B8A8_SRGB,
                 extent: [img.width(), img.height(), 1],
-                usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC | ImageUsage::SAMPLED,
                 ..Default::default()
             },
-            AllocationCreateInfo::default(),
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -167,7 +174,7 @@ fn main() {
         ImageView::new_default(image).unwrap()
     };
     {
-        let cmd_buff = uploads.build().unwrap();
+        let cmd_buff = uploads.build().unwrap(); // Uploads is builded here
         sync::now(device.clone())
             .then_execute(queue.clone(), cmd_buff)
             .unwrap()
@@ -175,7 +182,28 @@ fn main() {
             .unwrap();
         println!("Image uploaded");
     }
+    // let sampler = Sampler::new(
+    //     device.clone(),
+    //     SamplerCreateInfo {
+    //         mag_filter: Filter::Linear,
+    //         min_filter: Filter::Linear,
+    //         address_mode: [SamplerAddressMode::Repeat; 3],
+    //         ..Default::default()
+    //     },
+    // )
+    // .unwrap();
+    // println!("{:?}", texture.image().memory());
+    let mut app = window::App::new(
+        instance,
+        physical_device,
+        device,
+        queue,
+        texture,
+        desc_set_allocator,
+        None,
+        None,
+        cmd_buff_allocator,
+    );
     event_loop.set_control_flow(event_loop::ControlFlow::Poll);
-    let mut app = window::App::new(instance, physical_device, device, queue, texture);
     event_loop.run_app(&mut app).unwrap();
 }

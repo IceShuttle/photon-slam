@@ -3,6 +3,7 @@ use vulkano::command_buffer::allocator::CommandBufferAllocator;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage};
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
+use vulkano::format::Format;
 use vulkano::image::{Image, ImageUsage, view::ImageView};
 use vulkano::instance::Instance;
 use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
@@ -67,11 +68,26 @@ impl ApplicationHandler for App {
         let dimensions = window.inner_size();
         let composite_alpha = caps.supported_composite_alpha.into_iter().next().unwrap();
 
-        let image_format = self
+        let formats = self
             .physical_device
             .surface_formats(&surface, Default::default())
-            .unwrap()[0]
-            .0;
+            .unwrap();
+
+        let (image_format, _) = match formats.iter().find(|(fmt, _)| {
+            matches!(
+                *fmt,
+                Format::B8G8R8_SRGB
+                    | Format::R8G8B8_SRGB
+                    | Format::B8G8R8_UNORM
+                    | Format::R8G8B8_UNORM
+            )
+        }) {
+            Some(f) => *f,
+            None => {
+                println!("Using format {:?}", &formats[0]);
+                formats[0]
+            }
+        };
 
         let (swapchain, swapchain_images) = Swapchain::new(
             self.device.clone(),
@@ -132,7 +148,7 @@ impl ApplicationHandler for App {
                 present_builder
                     .blit_image(BlitImageInfo::images(
                         self.image.image().clone(),
-                        self.swapchain_images.as_ref().unwrap()[0].clone(),
+                        self.swapchain_images.as_ref().unwrap()[img_idx as usize].clone(),
                     ))
                     .unwrap();
 

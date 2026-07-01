@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use image::ImageReader;
 use vulkano::VulkanLibrary;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::{
@@ -88,7 +87,8 @@ fn main() {
     .unwrap();
 
     let texture = {
-        let img = ImageReader::open("cat.jpg").unwrap().decode().unwrap();
+        let img = image::open("cat.jpg").unwrap();
+
         let upload_buffer = Buffer::from_iter(
             memory_allocator.clone(),
             BufferCreateInfo {

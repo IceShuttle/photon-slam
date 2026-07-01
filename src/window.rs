@@ -4,9 +4,11 @@ use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, CommandBu
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
-use vulkano::image::{Image, ImageUsage, view::ImageView};
+use vulkano::image::{Image, ImageUsage};
 use vulkano::instance::Instance;
-use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
+use vulkano::swapchain::{
+    self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
+};
 use vulkano::sync::GpuFuture;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -20,7 +22,7 @@ pub struct App {
     surface: Option<Arc<Surface>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    image: Arc<ImageView>,
+    image: Arc<Image>,
     swapchain: Option<Arc<Swapchain>>,
     swapchain_images: Option<Vec<Arc<Image>>>,
     cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
@@ -31,7 +33,7 @@ impl App {
         physical_device: Arc<PhysicalDevice>,
         device: Arc<Device>,
         queue: Arc<Queue>,
-        image: Arc<ImageView>,
+        image: Arc<Image>,
         swapchain: Option<Arc<Swapchain>>,
         swapchain_images: Option<Vec<Arc<Image>>>,
         cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
@@ -70,22 +72,22 @@ impl ApplicationHandler for App {
 
         let formats = self
             .physical_device
-            .surface_formats(&surface, Default::default())
+            .surface_formats(&surface, SurfaceInfo::default())
             .unwrap();
 
-        let (image_format, _) = match formats.iter().find(|(fmt, _)| {
+        let image_format = match formats.iter().find(|(fmt, _)| {
             matches!(
                 *fmt,
-                Format::B8G8R8_SRGB
-                    | Format::R8G8B8_SRGB
-                    | Format::B8G8R8_UNORM
-                    | Format::R8G8B8_UNORM
+                Format::B8G8R8A8_SRGB
+                    | Format::R8G8B8A8_SRGB
+                    | Format::B8G8R8A8_UNORM
+                    | Format::R8G8B8A8_UNORM
             )
         }) {
-            Some(f) => *f,
+            Some(f) => f.0,
             None => {
-                println!("Using format {:?}", &formats[0]);
-                formats[0]
+                println!("Using format {:?}", &formats[0].0);
+                formats[0].0
             }
         };
 
@@ -147,7 +149,7 @@ impl ApplicationHandler for App {
 
                 present_builder
                     .blit_image(BlitImageInfo::images(
-                        self.image.image().clone(),
+                        self.image.clone(),
                         self.swapchain_images.as_ref().unwrap()[img_idx as usize].clone(),
                     ))
                     .unwrap();

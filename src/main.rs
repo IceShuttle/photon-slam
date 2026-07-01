@@ -8,7 +8,7 @@ use vulkano::command_buffer::{
 };
 use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags};
 use vulkano::format::Format;
-use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView};
+use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::swapchain::Surface;
@@ -88,6 +88,7 @@ fn main() {
 
     let texture = {
         let img = image::open("cat.jpg").unwrap();
+        let extent = [img.width(), img.height(), 1];
 
         let upload_buffer = Buffer::from_iter(
             memory_allocator.clone(),
@@ -109,8 +110,8 @@ fn main() {
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
                 format: Format::R8G8B8A8_SRGB,
-                extent: [img.width(), img.height(), 1],
-                usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC | ImageUsage::SAMPLED,
+                extent,
+                usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -126,7 +127,8 @@ fn main() {
                 image.clone(),
             ))
             .unwrap();
-        ImageView::new_default(image).unwrap()
+        // ImageView::new_default(image).unwrap()
+        image
     };
     {
         let cmd_buff = uploads.build().unwrap(); // Uploads is builded here

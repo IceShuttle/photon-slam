@@ -18,15 +18,20 @@ use winit::window::{Window, WindowId};
 pub struct App {
     instance: Arc<Instance>,
     physical_device: Arc<PhysicalDevice>,
-    window: Option<Arc<Window>>,
-    surface: Option<Arc<Surface>>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     image: Arc<Image>,
-    swapchain: Option<Arc<Swapchain>>,
-    swapchain_images: Option<Vec<Arc<Image>>>,
     cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
+    rcx: Option<RenderContext>,
 }
+
+pub struct RenderContext {
+    window: Arc<Window>,
+    surface: Arc<Surface>,
+    swapchain: Arc<Swapchain>,
+    swapchain_images: Vec<Arc<Image>>,
+}
+
 impl App {
     pub fn new(
         instance: Arc<Instance>,
@@ -34,21 +39,16 @@ impl App {
         device: Arc<Device>,
         queue: Arc<Queue>,
         image: Arc<Image>,
-        swapchain: Option<Arc<Swapchain>>,
-        swapchain_images: Option<Vec<Arc<Image>>>,
         cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
     ) -> Self {
         Self {
             instance,
-            window: None,
-            surface: None,
             physical_device,
             device,
             queue,
             image,
-            swapchain,
-            swapchain_images,
             cmd_buffer_allocator,
+            rcx: None,
         }
     }
 }
@@ -105,16 +105,12 @@ impl ApplicationHandler for App {
         )
         .unwrap();
         println!("Swapchain Initialized!");
-        self.swapchain = Some(swapchain);
-        self.swapchain_images = Some(swapchain_images);
-
-        // let render_pass = vulkano::single_pass_renderpass!(self.device.clone(),);
-
-        // println!("{:?}", swapchain);
-        // println!("Swapchain Size {}", swapchain_images.len());
-
-        self.window = Some(window);
-        self.surface = Some(surface);
+        self.rcx = Some(RenderContext {
+            swapchain,
+            swapchain_images,
+            window,
+            surface,
+        });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -124,17 +120,14 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                // match self.window.as_ref().unwrap().is_visible() {
-                //     Some(val) => println!("{val}!"),
-                //     None => println!("Wayland Magic!"),
-                // }
-                let result =
-                    swapchain::acquire_next_image(self.swapchain.as_ref().unwrap().clone(), None);
+                let rcx = self.rcx.as_ref().unwrap();
+
+                let result = swapchain::acquire_next_image(rcx.swapchain.clone(), None);
 
                 let (img_idx, _, acquire_future) = match result {
                     Ok(val) => val,
                     Err(_) => {
-                        self.window.as_ref().unwrap().request_redraw();
+                        rcx.window.request_redraw();
                         return;
                     }
                 };
@@ -145,12 +138,10 @@ impl ApplicationHandler for App {
                 )
                 .unwrap();
 
-                // let img = self.swapchain_images.unwrap();
-
                 present_builder
                     .blit_image(BlitImageInfo::images(
                         self.image.clone(),
-                        self.swapchain_images.as_ref().unwrap()[img_idx as usize].clone(),
+                        rcx.swapchain_images[img_idx as usize].clone(),
                     ))
                     .unwrap();
 
@@ -167,14 +158,11 @@ impl ApplicationHandler for App {
                 let _ = swapchain::present(
                     future,
                     self.queue.clone(),
-                    SwapchainPresentInfo::swapchain_image_index(
-                        self.swapchain.as_ref().unwrap().clone(),
-                        img_idx,
-                    ),
+                    SwapchainPresentInfo::swapchain_image_index(rcx.swapchain.clone(), img_idx),
                 )
                 .then_signal_fence_and_flush();
 
-                self.window.as_ref().unwrap().request_redraw();
+                rcx.window.request_redraw();
             }
             _ => (),
         }

@@ -146,8 +146,6 @@ fn main() {
         device,
         queue,
         texture,
-        None,
-        None,
         cmd_buff_allocator,
     );
     event_loop.set_control_flow(event_loop::ControlFlow::Poll);

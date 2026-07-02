@@ -7,8 +7,8 @@ use vulkano::{
 
 /// Prints the the Vulkan Device and API version
 pub fn print_info(physical_device: &PhysicalDevice) {
-    println!("API Version: {}", physical_device.api_version());
-    println!(
+    tracing::info!("API Version: {}", physical_device.api_version());
+    tracing::info!(
         "Device Name:{} and Type:{:?}",
         physical_device.properties().device_name,
         physical_device.properties().device_type
@@ -22,13 +22,13 @@ pub fn get_present_mode(
     let present_modes = physical_device.surface_present_modes(&surface, SurfaceInfo::default())?;
 
     let mode = if present_modes.contains(&PresentMode::Mailbox) {
-        println!("Using Mailbox PresentMode");
+        tracing::info!("Using Mailbox PresentMode");
         PresentMode::Mailbox
     } else if present_modes.contains(&PresentMode::Immediate) {
-        println!("Using Immediate PresentMode");
+        tracing::info!("Using Immediate PresentMode");
         PresentMode::Immediate
     } else {
-        println!("Using FIFO PresentMode");
+        tracing::info!("Using FIFO PresentMode");
         PresentMode::Fifo
     };
     Ok(mode)

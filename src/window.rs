@@ -44,8 +44,6 @@ pub struct RenderContext {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Self {
-        println!("Starting...");
-
         let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
 
         let required_extensions = Surface::required_extensions(event_loop).unwrap();
@@ -101,7 +99,7 @@ impl App {
             Default::default(),
         ));
 
-        println!("Vulkan Initialized");
+        tracing::info!("Vulkan Initialized");
 
         let mut uploads = AutoCommandBufferBuilder::primary(
             cmd_buff_allocator.clone(),
@@ -161,7 +159,7 @@ impl App {
                 .unwrap()
                 .flush()
                 .unwrap();
-            println!("Image uploaded");
+            tracing::debug!("Image uploaded");
         }
 
         Self {
@@ -198,6 +196,8 @@ impl ApplicationHandler for App {
             .surface_formats(&surface, SurfaceInfo::default())
             .unwrap();
 
+        tracing::debug!("Formats available: {:?}", formats);
+
         let image_format = match formats.iter().find(|(fmt, _)| {
             matches!(
                 *fmt,
@@ -209,7 +209,7 @@ impl ApplicationHandler for App {
         }) {
             Some(f) => f.0,
             None => {
-                println!("Using format {:?}", &formats[0].0);
+                tracing::info!("Using format {:?}", &formats[0].0);
                 formats[0].0
             }
         };

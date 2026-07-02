@@ -7,3 +7,5 @@ edition = "2024"
 vulkano = "0.35.2"
 winit = "0.30.13"
 image = "0.25"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

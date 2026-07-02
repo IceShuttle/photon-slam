@@ -213,6 +213,7 @@ impl ApplicationHandler for App {
                 formats[0].0
             }
         };
+        tracing::debug!("Selected Format: {:?}", image_format);
 
         let (swapchain, swapchain_images) = Swapchain::new(
             self.device.clone(),

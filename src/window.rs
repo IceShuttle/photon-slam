@@ -208,8 +208,8 @@ impl App {
         // the stored `Arc`. Only the per-frame dispatch recomputes the output.
         let compute_pipeline = {
             let bytes =
-                std::fs::read("shaders/compute.spv").expect("failed to read shaders/compute.spv");
-            let words = bytes_to_words(&bytes).expect("compute.spv length is not a multiple of 4");
+                include_bytes!(concat!(env!("OUT_DIR"), "/compute.spv"));
+            let words = bytes_to_words(bytes).expect("compute.spv length is not a multiple of 4");
             let module =
                 unsafe { ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words)) }
                     .expect("failed to create shader module from compute.spv");

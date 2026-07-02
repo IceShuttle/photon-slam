@@ -227,7 +227,7 @@ impl ApplicationHandler for App {
             },
         )
         .unwrap();
-        println!("Swapchain Initialized!");
+        tracing::info!("Swapchain Initialized!");
         self.rcx = Some(RenderContext {
             swapchain,
             swapchain_images,

@@ -18,9 +18,10 @@ fn setup_tracing() {
         .and_then(|s| if s.is_empty() { None } else { Some(s) })
         .unwrap_or_else(|| DEFAULT_LOGGING.to_owned());
 
-    tracing::subscriber::set_global_default(
+    match tracing::subscriber::set_global_default(
         FmtSubscriber::builder().with_env_filter(rust_log).finish(),
-    )
-    .expect("tracing setup failed");
-    tracing::debug!("Debug mode");
+    ) {
+        Ok(_) => tracing::debug!("Debug mode"),
+        Err(_) => eprintln!("Tracing cannot  be initiated"),
+    }
 }

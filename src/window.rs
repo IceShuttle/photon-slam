@@ -7,14 +7,23 @@ use vulkano::{
         AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyBufferToImageInfo,
         allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
     },
+    descriptor_set::{
+        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
+    },
     device::{
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
-        physical::PhysicalDevice,
+        Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures, Queue, QueueCreateInfo,
+        QueueFlags, physical::PhysicalDevice,
     },
     format::Format,
-    image::{Image, ImageCreateInfo, ImageType, ImageUsage},
+    image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
     instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::{
+        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
+        compute::ComputePipelineCreateInfo,
+        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
+    },
+    shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words},
     swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo},
     sync::{self, GpuFuture},
 };
@@ -31,7 +40,9 @@ pub struct App {
     physical_device: Arc<PhysicalDevice>,
     device: Arc<Device>,
     queue: Arc<Queue>,
-    image: Arc<Image>,
+    compute_pipeline: Arc<ComputePipeline>,
+    descriptor_set: Arc<DescriptorSet>,
+    output_image: Arc<Image>,
     cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
     rcx: Option<RenderContext>,
 }
@@ -77,6 +88,13 @@ impl App {
             .expect("couldn't find a graphics queue family")
             as u32;
 
+        assert!(
+            physical_device
+                .supported_features()
+                .shader_storage_image_write_without_format,
+            "device lacks shaderStorageImageWriteWithoutFormat, required by compute.spv"
+        );
+
         let (device, mut queues) = Device::new(
             physical_device.clone(),
             DeviceCreateInfo {
@@ -85,6 +103,10 @@ impl App {
                     ..Default::default()
                 }],
                 enabled_extensions: device_extensions,
+                enabled_features: DeviceFeatures {
+                    shader_storage_image_write_without_format: true,
+                    ..DeviceFeatures::empty()
+                },
                 ..Default::default()
             },
         )
@@ -131,9 +153,11 @@ impl App {
                 memory_allocator.clone(),
                 ImageCreateInfo {
                     image_type: ImageType::Dim2d,
-                    format: Format::R8G8B8A8_SRGB,
+                    // UNORM: the compute shader treats texels as raw normalized
+                    // values (1.0 - v), so no sRGB decode must happen on Load().
+                    format: Format::R8G8B8A8_UNORM,
                     extent,
-                    usage: ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
+                    usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
                     ..Default::default()
                 },
                 AllocationCreateInfo {
@@ -162,12 +186,80 @@ impl App {
             tracing::debug!("Image uploaded");
         }
 
+        // Storage image the compute shader writes into. Storage images can't be
+        // sRGB, so use the UNORM equivalent; same extent as the input texture.
+        let output_image = Image::new(
+            memory_allocator.clone(),
+            ImageCreateInfo {
+                image_type: ImageType::Dim2d,
+                format: Format::R8G8B8A8_UNORM,
+                extent: texture.extent(),
+                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Cache the compute pipeline: built once here and reused every frame via
+        // the stored `Arc`. Only the per-frame dispatch recomputes the output.
+        let compute_pipeline = {
+            let bytes =
+                std::fs::read("shaders/compute.spv").expect("failed to read shaders/compute.spv");
+            let words = bytes_to_words(&bytes).expect("compute.spv length is not a multiple of 4");
+            let module =
+                unsafe { ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words)) }
+                    .expect("failed to create shader module from compute.spv");
+            let entry_point = module
+                .entry_point("main")
+                .expect("compute.spv has no `main` entry point");
+            let stage = PipelineShaderStageCreateInfo::new(entry_point);
+            let layout = PipelineLayout::new(
+                device.clone(),
+                PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
+                    .into_pipeline_layout_create_info(device.clone())
+                    .unwrap(),
+            )
+            .unwrap();
+            ComputePipeline::new(
+                device.clone(),
+                None,
+                ComputePipelineCreateInfo::stage_layout(stage, layout),
+            )
+            .expect("failed to create compute pipeline")
+        };
+
+        // Bind input (set 0, binding 0) and output (set 0, binding 1) once; the
+        // views are stable, so only the dispatch is re-run each redraw.
+        let ds_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+            device.clone(),
+            Default::default(),
+        ));
+        let descriptor_set = DescriptorSet::new(
+            ds_allocator,
+            compute_pipeline.layout().set_layouts()[0].clone(),
+            [
+                WriteDescriptorSet::image_view(0, ImageView::new_default(texture.clone()).unwrap()),
+                WriteDescriptorSet::image_view(
+                    1,
+                    ImageView::new_default(output_image.clone()).unwrap(),
+                ),
+            ],
+            [],
+        )
+        .unwrap();
+
         Self {
             instance,
             physical_device,
             device,
             queue,
-            image: texture,
+            compute_pipeline,
+            descriptor_set,
+            output_image,
             cmd_buffer_allocator: cmd_buff_allocator,
             rcx: None,
         }
@@ -198,15 +290,10 @@ impl ApplicationHandler for App {
 
         tracing::debug!("Formats available: {:?}", formats);
 
-        let image_format = match formats.iter().find(|(fmt, _)| {
-            matches!(
-                *fmt,
-                Format::B8G8R8A8_SRGB
-                    | Format::R8G8B8A8_SRGB
-                    | Format::B8G8R8A8_UNORM
-                    | Format::R8G8B8A8_UNORM
-            )
-        }) {
+        let image_format = match formats
+            .iter()
+            .find(|(fmt, _)| matches!(*fmt, Format::B8G8R8A8_UNORM | Format::R8G8B8A8_UNORM))
+        {
             Some(f) => f.0,
             None => {
                 tracing::info!("Using format {:?}", &formats[0].0);
@@ -261,9 +348,25 @@ impl ApplicationHandler for App {
                 )
                 .unwrap();
 
+                let extent = self.output_image.extent();
+                let group_counts = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
+
+                // Recompute the compute pass every frame; the result is never cached.
+                present_builder
+                    .bind_pipeline_compute(self.compute_pipeline.clone())
+                    .unwrap()
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Compute,
+                        self.compute_pipeline.layout().clone(),
+                        0,
+                        self.descriptor_set.clone(),
+                    )
+                    .unwrap();
+                unsafe { present_builder.dispatch(group_counts) }.unwrap();
+
                 present_builder
                     .blit_image(BlitImageInfo::images(
-                        self.image.clone(),
+                        self.output_image.clone(),
                         rcx.swapchain_images[img_idx as usize].clone(),
                     ))
                     .unwrap();

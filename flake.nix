@@ -96,6 +96,7 @@
             pkgs.bacon
             pkgs.shader-slang
             pkgs.rust-analyzer
+            pkgs.clang-tools
           ];
 
         shellHook = ''

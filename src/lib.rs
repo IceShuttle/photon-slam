@@ -1,15 +1,15 @@
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
-// use crate::window::App;
+#[cfg(target_os = "android")]
 use winit::{
     event_loop::{ControlFlow, EventLoop},
     platform::android::EventLoopBuilderExtAndroid,
 };
-mod window;
-use window::App;
 
+mod window;
 use vulkano::device::physical::PhysicalDevice;
+use window::App;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]

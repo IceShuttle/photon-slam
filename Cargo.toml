@@ -6,12 +6,14 @@ edition = "2024"
 [dependencies]
 vulkano = "0.35.2"
 winit = { version = "0.30.13", features = ["android-native-activity"] }
-android_logger = "0.13"
-android-activity = { version = "0.6", features = ["native-activity"] }
 image = "0.25"
 log = "0.4"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.13"
+android-activity = { version = "0.6", features = ["native-activity"] }
 
 [lib]
 # name = "main"

@@ -16,7 +16,7 @@ use vulkano::{
     },
     format::Format,
     image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
-    instance::{Instance, InstanceCreateInfo, InstanceExtensions},
+    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
@@ -34,6 +34,7 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
+const IS_ANDROID: bool = cfg!(target_os = "android");
 
 pub struct App {
     instance: Arc<Instance>,
@@ -54,7 +55,6 @@ pub struct RenderContext {
 }
 
 impl App {
-    // pub fn new(event_loop: &EventLoop<()>) -> Self {
     pub fn new(event_loop: &EventLoop<()>) -> Self {
         let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
 
@@ -64,23 +64,34 @@ impl App {
             ..Default::default()
         };
 
+        let linux_instance_create_info = InstanceCreateInfo {
+            flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
+            enabled_extensions: required_extensions,
+            ..Default::default()
+        };
+
+        let android_instance_create_info = InstanceCreateInfo {
+            // ENUMERATE_PORTABILITY is only needed on macOS (MoltenVK);
+            // on Android it's meaningless and can confuse the loader.
+            // max_api_version capped to 1.0 to avoid vkGetDeviceQueue2
+            // which Mali's loader doesn't dispatch properly.
+            max_api_version: Some(vulkano::Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            }),
+            enabled_extensions: InstanceExtensions {
+                khr_get_physical_device_properties2: true,
+                ..required_extensions
+            },
+            ..Default::default()
+        };
+
         let instance = Instance::new(
             library,
-            InstanceCreateInfo {
-                // ENUMERATE_PORTABILITY is only needed on macOS (MoltenVK);
-                // on Android it's meaningless and can confuse the loader.
-                // max_api_version capped to 1.0 to avoid vkGetDeviceQueue2
-                // which Mali's loader doesn't dispatch properly.
-                max_api_version: Some(vulkano::Version {
-                    major: 1,
-                    minor: 0,
-                    patch: 0,
-                }),
-                enabled_extensions: InstanceExtensions {
-                    khr_get_physical_device_properties2: true,
-                    ..required_extensions
-                },
-                ..Default::default()
+            match IS_ANDROID {
+                true => android_instance_create_info,
+                false => linux_instance_create_info,
             },
         )
         .expect("failed to create instance");
@@ -110,7 +121,7 @@ impl App {
                 enabled_extensions: device_extensions,
                 enabled_features: DeviceFeatures {
                     shader_storage_image_write_without_format: true,
-                    shader_storage_image_read_without_format: true,
+                    shader_storage_image_read_without_format: IS_ANDROID,
                     ..DeviceFeatures::empty()
                 },
                 ..Default::default()

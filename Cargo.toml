@@ -9,13 +9,13 @@ winit = { version = "0.30.13", features = ["android-native-activity"] }
 android_logger = "0.13"
 android-activity = { version = "0.6", features = ["native-activity"] }
 image = "0.25"
-tracing = "0.1.44"
+log = "0.4"
+tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [lib]
 # name = "main"
 crate-type = ["cdylib"]
-
 [package.metadata.android]
 # The minimum API level your app will run on (e.g., 21 for Android 5.0)
 min_sdk_version = 21

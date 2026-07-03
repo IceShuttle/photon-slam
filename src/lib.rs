@@ -11,9 +11,21 @@ use window::App;
 
 use vulkano::device::physical::PhysicalDevice;
 
-// #[cfg(target_os = "android")]
+#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    // Route `tracing` (via its `log` feature) and `log` records to logcat.
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Debug)
+            .with_tag("photon-slam"),
+    );
+    // android-activity aborts on unwind; log the panic first so logcat shows
+    // the actual message instead of a bare native crash.
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("panic: {info}");
+    }));
+
     let event_loop = EventLoop::with_user_event()
         .with_android_app(app)
         .build()

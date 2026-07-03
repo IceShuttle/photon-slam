@@ -14,6 +14,8 @@ fn main() {
         .args([
             "-target",
             "spirv",
+            "-profile",
+            "spirv_1_0",
             "-o",
             &spv_output.to_string_lossy(),
             &slang_file.to_string_lossy(),

@@ -16,7 +16,7 @@ use vulkano::{
     },
     format::Format,
     image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
-    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo},
+    instance::{Instance, InstanceCreateInfo, InstanceExtensions},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
@@ -67,8 +67,19 @@ impl App {
         let instance = Instance::new(
             library,
             InstanceCreateInfo {
-                flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
-                enabled_extensions: required_extensions,
+                // ENUMERATE_PORTABILITY is only needed on macOS (MoltenVK);
+                // on Android it's meaningless and can confuse the loader.
+                // max_api_version capped to 1.0 to avoid vkGetDeviceQueue2
+                // which Mali's loader doesn't dispatch properly.
+                max_api_version: Some(vulkano::Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                }),
+                enabled_extensions: InstanceExtensions {
+                    khr_get_physical_device_properties2: true,
+                    ..required_extensions
+                },
                 ..Default::default()
             },
         )
@@ -89,13 +100,6 @@ impl App {
             .expect("couldn't find a graphics queue family")
             as u32;
 
-        assert!(
-            physical_device
-                .supported_features()
-                .shader_storage_image_write_without_format,
-            "device lacks shaderStorageImageWriteWithoutFormat, required by compute.spv"
-        );
-
         let (device, mut queues) = Device::new(
             physical_device.clone(),
             DeviceCreateInfo {
@@ -106,6 +110,7 @@ impl App {
                 enabled_extensions: device_extensions,
                 enabled_features: DeviceFeatures {
                     shader_storage_image_write_without_format: true,
+                    shader_storage_image_read_without_format: true,
                     ..DeviceFeatures::empty()
                 },
                 ..Default::default()
@@ -132,7 +137,13 @@ impl App {
         .unwrap();
 
         let texture = {
-            let img = image::open("moonchill.jpg").unwrap();
+            // Embedded at compile time: on Android there is no project dir at
+            // runtime (cwd is `/`), so a relative fs path can never resolve.
+            let img = image::load_from_memory(include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/moonchill.jpg"
+            )))
+            .unwrap();
             let extent = [img.width(), img.height(), 1];
 
             let upload_buffer = Buffer::from_iter(
@@ -349,7 +360,7 @@ impl ApplicationHandler for App {
                 .unwrap();
 
                 let extent = self.output_image.extent();
-                let group_counts = [extent[0].div_ceil(32), extent[1].div_ceil(32), 1];
+                let group_counts = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
 
                 // Recompute the compute pass every frame; the result is never cached.
                 present_builder

@@ -5,7 +5,23 @@ edition = "2024"
 
 [dependencies]
 vulkano = "0.35.2"
-winit = "0.30.13"
+winit = { version = "0.30.13", features = ["android-native-activity"] }
+android_logger = "0.13"
+android-activity = { version = "0.6", features = ["native-activity"] }
 image = "0.25"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[lib]
+# name = "main"
+crate-type = ["cdylib"]
+
+[package.metadata.android]
+# The minimum API level your app will run on (e.g., 21 for Android 5.0)
+min_sdk_version = 21
+
+# The target API level (Set this to the latest, e.g., 35 or 36)
+target_sdk_version = 30
+
+# Optional: Specify the build tools version if auto-detection fails
+build_tools_version = "35.0.0"

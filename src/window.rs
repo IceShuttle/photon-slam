@@ -54,6 +54,7 @@ pub struct RenderContext {
 }
 
 impl App {
+    // pub fn new(event_loop: &EventLoop<()>) -> Self {
     pub fn new(event_loop: &EventLoop<()>) -> Self {
         let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
 
@@ -79,7 +80,7 @@ impl App {
             .next()
             .expect("no devices available");
 
-        photon_slam::print_info(&physical_device);
+        // photon_slam::print_info(&physical_device);
 
         let queue_family_index = physical_device
             .queue_family_properties()
@@ -131,7 +132,7 @@ impl App {
         .unwrap();
 
         let texture = {
-            let img = image::open("cat.jpg").unwrap();
+            let img = image::open("moonchill.jpg").unwrap();
             let extent = [img.width(), img.height(), 1];
 
             let upload_buffer = Buffer::from_iter(
@@ -207,8 +208,7 @@ impl App {
         // Cache the compute pipeline: built once here and reused every frame via
         // the stored `Arc`. Only the per-frame dispatch recomputes the output.
         let compute_pipeline = {
-            let bytes =
-                include_bytes!(concat!(env!("OUT_DIR"), "/compute.spv"));
+            let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/compute.spv"));
             let words = bytes_to_words(bytes).expect("compute.spv length is not a multiple of 4");
             let module =
                 unsafe { ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words)) }
@@ -349,7 +349,7 @@ impl ApplicationHandler for App {
                 .unwrap();
 
                 let extent = self.output_image.extent();
-                let group_counts = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
+                let group_counts = [extent[0].div_ceil(32), extent[1].div_ceil(32), 1];
 
                 // Recompute the compute pass every frame; the result is never cached.
                 present_builder

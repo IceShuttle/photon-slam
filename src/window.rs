@@ -1,12 +1,10 @@
-use crate::fps::FpsCounter;
-use crate::{IS_ANDROID, vkutils};
+use crate::{IS_ANDROID, fps::FpsCounter, vulkan};
 use anyhow::{Context, Result};
 use std::{sync::Arc, time::SystemTime};
 
 use vulkano::{
-    buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
-        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyBufferToImageInfo,
+        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage,
         allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
     },
     descriptor_set::{
@@ -29,7 +27,6 @@ use vulkano::{
     swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo},
     sync::{self, GpuFuture},
 };
-
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -64,7 +61,7 @@ struct ShaderInputs {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
-        let (device_extensions, instance) = vkutils::get_instance_create_info(event_loop)?;
+        let (device_extensions, instance) = vulkan::system::get_instance_create_info(event_loop)?;
 
         let physical_device = instance
             .enumerate_physical_devices()
@@ -116,52 +113,8 @@ impl App {
             CommandBufferUsage::OneTimeSubmit,
         )?;
 
-        let texture = {
-            // Embedded at compile time: on Android there is no project dir at
-            // runtime (cwd is `/`), so a relative fs path can never resolve.
-            let img = image::load_from_memory(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/moonchill.jpg"
-            )))?;
-            let extent = [img.width(), img.height(), 1];
-
-            let upload_buffer = Buffer::from_iter(
-                memory_allocator.clone(),
-                BufferCreateInfo {
-                    usage: BufferUsage::TRANSFER_SRC,
-                    ..Default::default()
-                },
-                AllocationCreateInfo {
-                    memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                        | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                    ..Default::default()
-                },
-                img.to_rgba8().into_raw(),
-            )?;
-
-            let image = Image::new(
-                memory_allocator.clone(),
-                ImageCreateInfo {
-                    image_type: ImageType::Dim2d,
-                    // UNORM: the compute shader treats texels as raw normalized
-                    // values (1.0 - v), so no sRGB decode must happen on Load().
-                    format: Format::R8G8B8A8_UNORM,
-                    extent,
-                    usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
-                    ..Default::default()
-                },
-                AllocationCreateInfo {
-                    memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                    ..Default::default()
-                },
-            )?;
-
-            uploads.copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
-                upload_buffer,
-                image.clone(),
-            ))?;
-            image
-        };
+        let img = vulkan::image::load_image()?;
+        let texture = vulkan::image::upload_image(&memory_allocator, &mut uploads,img)?;
         {
             let cmd_buff = uploads.build()?; // Uploads is builded here
             sync::now(device.clone())

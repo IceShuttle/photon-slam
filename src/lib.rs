@@ -11,7 +11,7 @@ use winit::{
     platform::android::EventLoopBuilderExtAndroid,
 };
 
-pub mod vkutils;
+pub mod vulkan;
 #[cfg(target_os = "android")]
 mod window;
 

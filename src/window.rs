@@ -99,7 +99,7 @@ impl App {
         )
         .expect("failed to create device");
 
-        let queue = queues.next().unwrap();
+        let queue =queues.next().context("no graphics queue found")?;
 
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
@@ -115,7 +115,7 @@ impl App {
             queue_family_index,
             CommandBufferUsage::OneTimeSubmit,
         )
-        .unwrap();
+        ?;
 
         let texture = {
             // Embedded at compile time: on Android there is no project dir at
@@ -230,10 +230,10 @@ impl App {
             ds_allocator,
             compute_pipeline.layout().set_layouts()[0].clone(),
             [
-                WriteDescriptorSet::image_view(0, ImageView::new_default(texture.clone()).unwrap()),
+                WriteDescriptorSet::image_view(0, ImageView::new_default(texture.clone())?),
                 WriteDescriptorSet::image_view(
                     1,
-                    ImageView::new_default(output_image.clone()).unwrap(),
+                    ImageView::new_default(output_image.clone())?,
                 ),
             ],
             [],

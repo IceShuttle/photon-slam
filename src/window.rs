@@ -70,8 +70,8 @@ impl ApplicationHandler for App {
             self.vk_context.physical_device.clone(),
             self.vk_context.device.clone(),
         )
-        .ok();
-        self.rcx = rcx;
+        .expect("Vulkan Initialization Failed");
+        self.rcx = Some(rcx);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {

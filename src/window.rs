@@ -99,7 +99,7 @@ impl App {
         )
         .expect("failed to create device");
 
-        let queue =queues.next().context("no graphics queue found")?;
+        let queue = queues.next().context("no graphics queue found")?;
 
         let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
@@ -114,8 +114,7 @@ impl App {
             cmd_buff_allocator.clone(),
             queue_family_index,
             CommandBufferUsage::OneTimeSubmit,
-        )
-        ?;
+        )?;
 
         let texture = {
             // Embedded at compile time: on Android there is no project dir at
@@ -123,8 +122,7 @@ impl App {
             let img = image::load_from_memory(include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/moonchill.jpg"
-            )))
-            ?;
+            )))?;
             let extent = [img.width(), img.height(), 1];
 
             let upload_buffer = Buffer::from_iter(
@@ -139,8 +137,7 @@ impl App {
                     ..Default::default()
                 },
                 img.to_rgba8().into_raw(),
-            )
-            ?;
+            )?;
 
             let image = Image::new(
                 memory_allocator.clone(),
@@ -157,15 +154,12 @@ impl App {
                     memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
                     ..Default::default()
                 },
-            )
-            ?;
+            )?;
 
-            uploads
-                .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
-                    upload_buffer,
-                    image.clone(),
-                ))
-                ?;
+            uploads.copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+                upload_buffer,
+                image.clone(),
+            ))?;
             image
         };
         {
@@ -208,10 +202,8 @@ impl App {
             let layout = PipelineLayout::new(
                 device.clone(),
                 PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
-                    .into_pipeline_layout_create_info(device.clone())
-                    ?,
-            )
-            ?;
+                    .into_pipeline_layout_create_info(device.clone())?,
+            )?;
             ComputePipeline::new(
                 device.clone(),
                 None,
@@ -231,14 +223,10 @@ impl App {
             compute_pipeline.layout().set_layouts()[0].clone(),
             [
                 WriteDescriptorSet::image_view(0, ImageView::new_default(texture.clone())?),
-                WriteDescriptorSet::image_view(
-                    1,
-                    ImageView::new_default(output_image.clone())?,
-                ),
+                WriteDescriptorSet::image_view(1, ImageView::new_default(output_image.clone())?),
             ],
             [],
-        )
-        ?;
+        )?;
 
         Ok(Self {
             instance,

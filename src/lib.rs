@@ -1,3 +1,7 @@
+/// Frame-rate counter using `tracing`.
+pub mod fps;
+pub mod window;
+
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
@@ -7,13 +11,15 @@ use winit::{
     platform::android::EventLoopBuilderExtAndroid,
 };
 
+pub mod vkutils;
+#[cfg(target_os = "android")]
 mod window;
-use vulkano::device::physical::PhysicalDevice;
-use window::App;
 
+pub const IS_ANDROID: bool = cfg!(target_os = "android");
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    use window::App;
     // Route `tracing` (via its `log` feature) and `log` records to logcat.
     android_logger::init_once(
         android_logger::Config::default()
@@ -31,11 +37,12 @@ fn android_main(app: AndroidApp) {
         .build()
         .unwrap();
 
-    let mut app = App::new(&event_loop);
+    let mut app = App::new(&event_loop).unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run_app(&mut app).unwrap();
 }
 
+use vulkano::device::physical::PhysicalDevice;
 /// Prints the the Vulkan Device and API version
 pub fn print_info(physical_device: &PhysicalDevice) {
     tracing::info!("API Version: {}", physical_device.api_version());

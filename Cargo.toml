@@ -10,14 +10,16 @@ image = "0.25"
 log = "0.4"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+bytemuck = "1.25.0"
+anyhow = "1.0.103"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.13"
 android-activity = { version = "0.6", features = ["native-activity"] }
 
 [lib]
-# name = "main"
-crate-type = ["cdylib"]
+crate-type = ["cdylib","rlib"]
+
 [package.metadata.android]
 # The minimum API level your app will run on (e.g., 21 for Android 5.0)
 min_sdk_version = 21

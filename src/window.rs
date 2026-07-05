@@ -1,7 +1,9 @@
-use std::sync::Arc;
+use crate::fps::FpsCounter;
+use crate::{IS_ANDROID, vkutils};
+use anyhow::{Context, Result};
+use std::{sync::Arc, time::SystemTime};
 
 use vulkano::{
-    VulkanLibrary,
     buffer::{Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
         AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyBufferToImageInfo,
@@ -11,12 +13,12 @@ use vulkano::{
         DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
     },
     device::{
-        Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures, Queue, QueueCreateInfo,
-        QueueFlags, physical::PhysicalDevice,
+        Device, DeviceCreateInfo, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags,
+        physical::PhysicalDevice,
     },
     format::Format,
     image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
-    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
+    instance::Instance,
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
@@ -34,7 +36,6 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
-const IS_ANDROID: bool = cfg!(target_os = "android");
 
 pub struct App {
     instance: Arc<Instance>,
@@ -46,6 +47,8 @@ pub struct App {
     output_image: Arc<Image>,
     cmd_buffer_allocator: Arc<dyn CommandBufferAllocator>,
     rcx: Option<RenderContext>,
+    fps: FpsCounter,
+    start_time: SystemTime,
 }
 
 pub struct RenderContext {
@@ -53,48 +56,15 @@ pub struct RenderContext {
     swapchain: Arc<Swapchain>,
     swapchain_images: Vec<Arc<Image>>,
 }
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ShaderInputs {
+    time: u32,
+}
 
 impl App {
-    pub fn new(event_loop: &EventLoop<()>) -> Self {
-        let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
-
-        let required_extensions = Surface::required_extensions(event_loop).unwrap();
-        let device_extensions = DeviceExtensions {
-            khr_swapchain: true,
-            ..Default::default()
-        };
-
-        let linux_instance_create_info = InstanceCreateInfo {
-            flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
-            enabled_extensions: required_extensions,
-            ..Default::default()
-        };
-
-        let android_instance_create_info = InstanceCreateInfo {
-            // ENUMERATE_PORTABILITY is only needed on macOS (MoltenVK);
-            // on Android it's meaningless and can confuse the loader.
-            // max_api_version capped to 1.0 to avoid vkGetDeviceQueue2
-            // which Mali's loader doesn't dispatch properly.
-            max_api_version: Some(vulkano::Version {
-                major: 1,
-                minor: 0,
-                patch: 0,
-            }),
-            enabled_extensions: InstanceExtensions {
-                khr_get_physical_device_properties2: true,
-                ..required_extensions
-            },
-            ..Default::default()
-        };
-
-        let instance = Instance::new(
-            library,
-            match IS_ANDROID {
-                true => android_instance_create_info,
-                false => linux_instance_create_info,
-            },
-        )
-        .expect("failed to create instance");
+    pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
+        let (device_extensions, instance) = vkutils::get_instance_create_info(event_loop)?;
 
         let physical_device = instance
             .enumerate_physical_devices()
@@ -102,7 +72,7 @@ impl App {
             .next()
             .expect("no devices available");
 
-        // photon_slam::print_info(&physical_device);
+        crate::print_info(&physical_device);
 
         let queue_family_index = physical_device
             .queue_family_properties()
@@ -154,7 +124,7 @@ impl App {
                 env!("CARGO_MANIFEST_DIR"),
                 "/moonchill.jpg"
             )))
-            .unwrap();
+            ?;
             let extent = [img.width(), img.height(), 1];
 
             let upload_buffer = Buffer::from_iter(
@@ -170,7 +140,7 @@ impl App {
                 },
                 img.to_rgba8().into_raw(),
             )
-            .unwrap();
+            ?;
 
             let image = Image::new(
                 memory_allocator.clone(),
@@ -188,24 +158,21 @@ impl App {
                     ..Default::default()
                 },
             )
-            .unwrap();
+            ?;
 
             uploads
                 .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
                     upload_buffer,
                     image.clone(),
                 ))
-                .unwrap();
-            // ImageView::new_default(image).unwrap()
+                ?;
             image
         };
         {
-            let cmd_buff = uploads.build().unwrap(); // Uploads is builded here
+            let cmd_buff = uploads.build()?; // Uploads is builded here
             sync::now(device.clone())
-                .then_execute(queue.clone(), cmd_buff)
-                .unwrap()
-                .flush()
-                .unwrap();
+                .then_execute(queue.clone(), cmd_buff)?
+                .flush()?;
             tracing::debug!("Image uploaded");
         }
 
@@ -224,8 +191,7 @@ impl App {
                 memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
 
         // Cache the compute pipeline: built once here and reused every frame via
         // the stored `Arc`. Only the per-frame dispatch recomputes the output.
@@ -234,24 +200,24 @@ impl App {
             let words = bytes_to_words(bytes).expect("compute.spv length is not a multiple of 4");
             let module =
                 unsafe { ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words)) }
-                    .expect("failed to create shader module from compute.spv");
+                    .context("failed to create shader module from compute.spv")?;
             let entry_point = module
                 .entry_point("main")
-                .expect("compute.spv has no `main` entry point");
+                .context("compute.spv has no `main` entry point")?;
             let stage = PipelineShaderStageCreateInfo::new(entry_point);
             let layout = PipelineLayout::new(
                 device.clone(),
                 PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
                     .into_pipeline_layout_create_info(device.clone())
-                    .unwrap(),
+                    ?,
             )
-            .unwrap();
+            ?;
             ComputePipeline::new(
                 device.clone(),
                 None,
                 ComputePipelineCreateInfo::stage_layout(stage, layout),
             )
-            .expect("failed to create compute pipeline")
+            .context("failed to create compute pipeline")?
         };
 
         // Bind input (set 0, binding 0) and output (set 0, binding 1) once; the
@@ -272,9 +238,9 @@ impl App {
             ],
             [],
         )
-        .unwrap();
+        ?;
 
-        Self {
+        Ok(Self {
             instance,
             physical_device,
             device,
@@ -284,7 +250,9 @@ impl App {
             output_image,
             cmd_buffer_allocator: cmd_buff_allocator,
             rcx: None,
-        }
+            fps: FpsCounter::new(),
+            start_time: SystemTime::now(),
+        })
     }
 }
 
@@ -372,10 +340,20 @@ impl ApplicationHandler for App {
 
                 let extent = self.output_image.extent();
                 let group_counts = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
-
+                let curr_time = SystemTime::now();
+                let elapsed = curr_time
+                    .duration_since(self.start_time)
+                    .unwrap()
+                    .as_millis() as u32;
                 // Recompute the compute pass every frame; the result is never cached.
                 present_builder
                     .bind_pipeline_compute(self.compute_pipeline.clone())
+                    .unwrap()
+                    .push_constants(
+                        self.compute_pipeline.layout().clone(),
+                        0,
+                        ShaderInputs { time: elapsed },
+                    )
                     .unwrap()
                     .bind_descriptor_sets(
                         PipelineBindPoint::Compute,
@@ -409,6 +387,8 @@ impl ApplicationHandler for App {
                     SwapchainPresentInfo::swapchain_image_index(rcx.swapchain.clone(), img_idx),
                 )
                 .then_signal_fence_and_flush();
+
+                self.fps.tick();
 
                 rcx.window.request_redraw();
             }

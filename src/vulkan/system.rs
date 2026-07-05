@@ -1,14 +1,17 @@
 use crate::IS_ANDROID;
-use anyhow::{Result};
+use anyhow::{Context, Result};
+use std::sync::Arc;
+use vulkano::device::physical::PhysicalDevice;
+use vulkano::device::{
+    Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures, Queue, QueueCreateInfo,
+};
 use vulkano::{
     instance::{InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
     swapchain::Surface,
 };
 use winit::event_loop::EventLoop;
 
-pub fn get_instance_create_info(
-    event_loop: &EventLoop<()>,
-) -> Result<InstanceCreateInfo> {
+pub fn get_instance_create_info(event_loop: &EventLoop<()>) -> Result<InstanceCreateInfo> {
     let required_extensions = Surface::required_extensions(event_loop)?;
 
     let linux_instance_create_info = InstanceCreateInfo {
@@ -38,6 +41,31 @@ pub fn get_instance_create_info(
         true => android_instance_create_info,
         false => linux_instance_create_info,
     };
-    
+
     Ok(instance_create_info)
+}
+pub fn create_logical_device(
+    physical_device: Arc<PhysicalDevice>,
+    queue_family_index: u32,
+) -> Result<(Arc<Device>, impl ExactSizeIterator<Item = Arc<Queue>>)> {
+    Device::new(
+        physical_device,
+        DeviceCreateInfo {
+            queue_create_infos: vec![QueueCreateInfo {
+                queue_family_index,
+                ..Default::default()
+            }],
+            enabled_extensions: DeviceExtensions {
+                khr_swapchain: true,
+                ..Default::default()
+            },
+            enabled_features: DeviceFeatures {
+                shader_storage_image_write_without_format: true,
+                shader_storage_image_read_without_format: IS_ANDROID,
+                ..DeviceFeatures::empty()
+            },
+            ..Default::default()
+        },
+    )
+    .context("failed to create device")
 }

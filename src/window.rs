@@ -1,26 +1,38 @@
-use crate::{IS_ANDROID, fps::FpsCounter, vulkan};
+use crate::{
+    fps::FpsCounter,
+    vulkan::{self, disp::RenderContext},
+};
 use anyhow::{Context, Result};
 use std::{sync::Arc, time::SystemTime};
 
-use vulkano::{command_buffer::{
-    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage,
-    allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
-}, descriptor_set::{
-    DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
-}, device::{
-    Device, DeviceCreateInfo, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags,
-    physical::PhysicalDevice,
-}, format::Format, image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView}, instance::Instance, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator}, pipeline::{
-    ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
-    compute::ComputePipelineCreateInfo,
-    layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
-}, shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words}, swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo}, sync::{self, GpuFuture}, VulkanLibrary};
-use vulkano::device::DeviceExtensions;
+use vulkano::{
+    VulkanLibrary,
+    command_buffer::{
+        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage,
+        allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
+    },
+    descriptor_set::{
+        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
+    },
+    device::{Device, Queue, QueueFlags, physical::PhysicalDevice},
+    format::Format,
+    image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
+    instance::Instance,
+    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
+    pipeline::{
+        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
+        compute::ComputePipelineCreateInfo,
+        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
+    },
+    shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words},
+    swapchain::{self, SwapchainPresentInfo},
+    sync::{self, GpuFuture},
+};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
-    window::{Window, WindowId},
+    window::WindowId,
 };
 
 pub struct App {
@@ -37,11 +49,6 @@ pub struct App {
     start_time: SystemTime,
 }
 
-pub struct RenderContext {
-    window: Arc<Window>,
-    swapchain: Arc<Swapchain>,
-    swapchain_images: Vec<Arc<Image>>,
-}
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct ShaderInputs {
@@ -51,10 +58,6 @@ struct ShaderInputs {
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
         let library = VulkanLibrary::new().context("Vulkan loader/dll not found")?;
-        let device_extensions = DeviceExtensions {
-            khr_swapchain: true,
-            ..Default::default()
-        };
         let instance_create_info = vulkan::system::get_instance_create_info(event_loop)?;
         let instance = Instance::new(library, instance_create_info)?;
         let physical_device = instance
@@ -72,23 +75,8 @@ impl App {
             .expect("couldn't find a graphics queue family")
             as u32;
 
-        let (device, mut queues) = Device::new(
-            physical_device.clone(),
-            DeviceCreateInfo {
-                queue_create_infos: vec![QueueCreateInfo {
-                    queue_family_index,
-                    ..Default::default()
-                }],
-                enabled_extensions: device_extensions,
-                enabled_features: DeviceFeatures {
-                    shader_storage_image_write_without_format: true,
-                    shader_storage_image_read_without_format: IS_ANDROID,
-                    ..DeviceFeatures::empty()
-                },
-                ..Default::default()
-            },
-        )
-        .expect("failed to create device");
+        let (device, mut queues) =
+            vulkan::system::create_logical_device(physical_device.clone(), queue_family_index)?;
 
         let queue = queues.next().context("no graphics queue found")?;
 
@@ -108,7 +96,7 @@ impl App {
         )?;
 
         let img = vulkan::image::load_image()?;
-        let texture = vulkan::image::upload_image(&memory_allocator, &mut uploads,img)?;
+        let texture = vulkan::image::upload_image(&memory_allocator, &mut uploads, img)?;
         {
             let cmd_buff = uploads.build()?; // Uploads is builded here
             sync::now(device.clone())
@@ -193,59 +181,14 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = Arc::new(
-            event_loop
-                .create_window(Window::default_attributes())
-                .unwrap(),
-        );
-        let surface = Surface::from_window(self.instance.clone(), window.clone()).unwrap();
-
-        let caps = self
-            .physical_device
-            .surface_capabilities(&surface, Default::default())
-            .unwrap();
-
-        let dimensions = window.inner_size();
-        let composite_alpha = caps.supported_composite_alpha.into_iter().next().unwrap();
-
-        let formats = self
-            .physical_device
-            .surface_formats(&surface, SurfaceInfo::default())
-            .unwrap();
-
-        tracing::debug!("Formats available: {:?}", formats);
-
-        let image_format = match formats
-            .iter()
-            .find(|(fmt, _)| matches!(*fmt, Format::B8G8R8A8_UNORM | Format::R8G8B8A8_UNORM))
-        {
-            Some(f) => f.0,
-            None => {
-                tracing::info!("Using format {:?}", &formats[0].0);
-                formats[0].0
-            }
-        };
-        tracing::debug!("Selected Format: {:?}", image_format);
-
-        let (swapchain, swapchain_images) = Swapchain::new(
+        let rcx = RenderContext::new(
+            event_loop,
+            self.instance.clone(),
+            self.physical_device.clone(),
             self.device.clone(),
-            surface.clone(),
-            SwapchainCreateInfo {
-                min_image_count: caps.min_image_count + 1, // How many buffers to use in the swapchain
-                image_format,
-                image_extent: dimensions.into(),
-                image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST, // What the images are going to be used for
-                composite_alpha,
-                ..Default::default()
-            },
         )
-        .unwrap();
-        tracing::info!("Swapchain Initialized!");
-        self.rcx = Some(RenderContext {
-            swapchain,
-            swapchain_images,
-            window,
-        });
+        .ok();
+        self.rcx = rcx;
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -259,13 +202,6 @@ impl ApplicationHandler for App {
 
                 let result = swapchain::acquire_next_image(rcx.swapchain.clone(), None);
 
-                let (img_idx, _, acquire_future) = match result {
-                    Ok(val) => val,
-                    Err(_) => {
-                        rcx.window.request_redraw();
-                        return;
-                    }
-                };
                 let mut present_builder = AutoCommandBufferBuilder::primary(
                     self.cmd_buffer_allocator.clone(),
                     self.queue.queue_family_index(),
@@ -299,6 +235,13 @@ impl ApplicationHandler for App {
                     .unwrap();
                 unsafe { present_builder.dispatch(group_counts) }.unwrap();
 
+                let (img_idx, _, acquire_future) = match result {
+                    Ok(val) => val,
+                    Err(_) => {
+                        rcx.window.request_redraw();
+                        return;
+                    }
+                };
                 present_builder
                     .blit_image(BlitImageInfo::images(
                         self.output_image.clone(),

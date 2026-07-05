@@ -1,6 +1,6 @@
-use anyhow::{Error,Result};
-use std::sync::Arc;
+use anyhow::{Error, Result};
 use image::DynamicImage;
+use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
@@ -9,13 +9,12 @@ use vulkano::format::Format;
 use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 
-
-pub fn load_image() ->Result<DynamicImage>{
+pub fn load_image() -> Result<DynamicImage> {
     // Embedded at compile time: on Android there is no project dir at
     // runtime (cwd is `/`), so a relative fs path can never resolve.
     let img = image::load_from_memory(include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/moonchill.jpg"
+        env!("CARGO_MANIFEST_DIR"),
+        "/moonchill.jpg"
     )))?;
     Ok(img)
 }
@@ -23,9 +22,8 @@ pub fn load_image() ->Result<DynamicImage>{
 pub fn upload_image(
     memory_allocator: &Arc<StandardMemoryAllocator>,
     cmd_buffer: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    img: DynamicImage
+    img: DynamicImage,
 ) -> Result<Arc<Image>, Error> {
-
     let extent = [img.width(), img.height(), 1];
 
     let upload_buffer = Buffer::from_iter(

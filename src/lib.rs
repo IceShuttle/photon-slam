@@ -1,3 +1,9 @@
+//! # Photon SLAM
+//!
+//! An GPU acclerated implementation of vSLAM that aims works on both Linux and Android through use of Vulkan
+//!
+//! It tries to achieve this using the vulkan compute and shaders written in slang
+//! It Currently uses winit for window management
 /// Frame-rate counter using `tracing`.
 pub mod fps;
 /// Vulkan QOL utilities for instantiation and boilerplate

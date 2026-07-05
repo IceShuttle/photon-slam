@@ -9,9 +9,11 @@ use vulkano::format::Format;
 use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 
+/// Loads Image for processing
+///
+/// Embedded at compile time: on Android there is no project dir at
+/// runtime (cwd is `/`), so a relative fs path can never resolve.
 pub fn load_image() -> Result<DynamicImage> {
-    // Embedded at compile time: on Android there is no project dir at
-    // runtime (cwd is `/`), so a relative fs path can never resolve.
     let img = image::load_from_memory(include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/moonchill.jpg"
@@ -19,6 +21,7 @@ pub fn load_image() -> Result<DynamicImage> {
     Ok(img)
 }
 
+/// Uploads Image to GPU using command buffer but does not sync and flush
 pub fn upload_image(
     memory_allocator: &Arc<StandardMemoryAllocator>,
     cmd_buffer: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,

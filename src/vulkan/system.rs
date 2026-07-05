@@ -11,6 +11,9 @@ use vulkano::{
 };
 use winit::event_loop::EventLoop;
 
+/// Crates Instance creation info
+///
+/// Created different info for Android and PC for compatibility
 pub fn get_instance_create_info(event_loop: &EventLoop<()>) -> Result<InstanceCreateInfo> {
     let required_extensions = Surface::required_extensions(event_loop)?;
 
@@ -44,6 +47,8 @@ pub fn get_instance_create_info(event_loop: &EventLoop<()>) -> Result<InstanceCr
 
     Ok(instance_create_info)
 }
+
+/// Creates Logical Device
 pub fn create_logical_device(
     physical_device: Arc<PhysicalDevice>,
     queue_family_index: u32,

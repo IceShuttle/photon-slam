@@ -11,12 +11,16 @@ use vulkano::{
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
+/// Contains Everything required to draw on Screen
 pub struct RenderContext {
     pub window: Arc<Window>,
     pub swapchain: Arc<Swapchain>,
     pub swapchain_images: Vec<Arc<Image>>,
 }
 impl RenderContext {
+    /// Crates a new rendering context
+    ///
+    /// Uses UNORM in display format instead of sRGB for simple image manipulation
     pub fn new(
         event_loop: &ActiveEventLoop,
         instance: Arc<Instance>,

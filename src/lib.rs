@@ -1,5 +1,8 @@
 /// Frame-rate counter using `tracing`.
 pub mod fps;
+/// Vulkan QOL utilities for instantiation and boilerplate
+pub mod vulkan;
+/// Creates Window for Display
 pub mod window;
 
 #[cfg(target_os = "android")]
@@ -11,10 +14,10 @@ use winit::{
     platform::android::EventLoopBuilderExtAndroid,
 };
 
-pub mod vulkan;
 #[cfg(target_os = "android")]
 mod window;
 
+/// Tells wether it is being compiled for android or not!
 pub const IS_ANDROID: bool = cfg!(target_os = "android");
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]

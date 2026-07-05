@@ -54,8 +54,11 @@ pub struct App {
 struct ShaderInputs {
     time: u32,
 }
-
+/// App that runs the event loop
+///
+/// It is the owner of the rendering context and currently also the vulkan instance
 impl App {
+    /// Creates new App
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
         let library = VulkanLibrary::new().context("Vulkan loader/dll not found")?;
         let instance_create_info = vulkan::system::get_instance_create_info(event_loop)?;

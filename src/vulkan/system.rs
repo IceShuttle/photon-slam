@@ -1,23 +1,15 @@
 use crate::IS_ANDROID;
-use anyhow::{Context, Result};
-use std::sync::Arc;
+use anyhow::{Result};
 use vulkano::{
-    VulkanLibrary,
-    device::DeviceExtensions,
-    instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
+    instance::{InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
     swapchain::Surface,
 };
 use winit::event_loop::EventLoop;
 
 pub fn get_instance_create_info(
     event_loop: &EventLoop<()>,
-) -> Result<(DeviceExtensions, Arc<Instance>)> {
-    let library = VulkanLibrary::new().context("Vulkan loader/dll not found")?;
+) -> Result<InstanceCreateInfo> {
     let required_extensions = Surface::required_extensions(event_loop)?;
-    let device_extensions = DeviceExtensions {
-        khr_swapchain: true,
-        ..Default::default()
-    };
 
     let linux_instance_create_info = InstanceCreateInfo {
         flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
@@ -46,6 +38,6 @@ pub fn get_instance_create_info(
         true => android_instance_create_info,
         false => linux_instance_create_info,
     };
-    let instance = Instance::new(library, instance_create_info)?;
-    Ok((device_extensions, instance))
+    
+    Ok(instance_create_info)
 }

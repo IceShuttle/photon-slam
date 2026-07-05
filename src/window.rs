@@ -2,31 +2,20 @@ use crate::{IS_ANDROID, fps::FpsCounter, vulkan};
 use anyhow::{Context, Result};
 use std::{sync::Arc, time::SystemTime};
 
-use vulkano::{
-    command_buffer::{
-        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage,
-        allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
-    },
-    descriptor_set::{
-        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
-    },
-    device::{
-        Device, DeviceCreateInfo, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags,
-        physical::PhysicalDevice,
-    },
-    format::Format,
-    image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
-    instance::Instance,
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
-    pipeline::{
-        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
-        compute::ComputePipelineCreateInfo,
-        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
-    },
-    shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words},
-    swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo},
-    sync::{self, GpuFuture},
-};
+use vulkano::{command_buffer::{
+    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage,
+    allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
+}, descriptor_set::{
+    DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
+}, device::{
+    Device, DeviceCreateInfo, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags,
+    physical::PhysicalDevice,
+}, format::Format, image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView}, instance::Instance, memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator}, pipeline::{
+    ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
+    compute::ComputePipelineCreateInfo,
+    layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
+}, shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words}, swapchain::{self, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo}, sync::{self, GpuFuture}, VulkanLibrary};
+use vulkano::device::DeviceExtensions;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -61,8 +50,13 @@ struct ShaderInputs {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
-        let (device_extensions, instance) = vulkan::system::get_instance_create_info(event_loop)?;
-
+        let library = VulkanLibrary::new().context("Vulkan loader/dll not found")?;
+        let device_extensions = DeviceExtensions {
+            khr_swapchain: true,
+            ..Default::default()
+        };
+        let instance_create_info = vulkan::system::get_instance_create_info(event_loop)?;
+        let instance = Instance::new(library, instance_create_info)?;
         let physical_device = instance
             .enumerate_physical_devices()
             .expect("could not enumerate devices")

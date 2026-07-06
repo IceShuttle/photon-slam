@@ -38,14 +38,12 @@
 
       fenixPkgs = fenix.packages.${system};
       rustToolchain = fenixPkgs.stable.toolchain;
-      android-rust = [
-        (with fenixPkgs;
-          combine [
-            stable.toolchain
-            targets.aarch64-linux-android.stable.rust-std
-            targets.x86_64-linux-android.stable.rust-std
-          ])
-      ];
+      android-rust = with fenixPkgs;
+        combine [
+          stable.toolchain
+          targets.aarch64-linux-android.stable.rust-std
+          targets.x86_64-linux-android.stable.rust-std
+        ];
 
       craneLib = (crane.mkLib nixpkgs.legacyPackages.${system}).overrideToolchain rustToolchain;
       android-craneLib = (crane.mkLib nixpkgs.legacyPackages.${system}).overrideToolchain android-rust;
@@ -155,7 +153,6 @@
         shellHook = ''
           export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH;
           export ANDROID_HOME=${android.androidsdk}/libexec/android-sdk;
-          export ANDROID_SDK_ROOT=${android.androidsdk}/libexec/android-sdk;
         '';
       };
     });

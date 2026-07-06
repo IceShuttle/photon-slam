@@ -12,8 +12,7 @@ fn main() {
 fn setup_tracing() {
     const DEFAULT_LOGGING: &str = "photon_slam=info,warn";
 
-    let rust_log = std::env::var("RUST_LOG")
-        .unwrap_or(DEFAULT_LOGGING.to_owned());
+    let rust_log = std::env::var("RUST_LOG").unwrap_or(DEFAULT_LOGGING.to_owned());
 
     match tracing::subscriber::set_global_default(
         FmtSubscriber::builder().with_env_filter(rust_log).finish(),

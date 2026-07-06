@@ -4,8 +4,7 @@ use std::sync::Arc;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{
-        DescriptorSet, WriteDescriptorSet,
-        allocator::StandardDescriptorSetAllocator,
+        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
     },
     format::Format,
     image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
@@ -51,12 +50,10 @@ impl OrbPass {
 
         // --- compile SPIR-V ---
         let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/orb.spv"));
-        let words =
-            bytes_to_words(bytes).context("orb.spv length is not a multiple of 4")?;
-        let module = unsafe {
-            ShaderModule::new(ctx.device.clone(), ShaderModuleCreateInfo::new(&words))
-        }
-        .context("failed to create shader module from orb.spv")?;
+        let words = bytes_to_words(bytes).context("orb.spv length is not a multiple of 4")?;
+        let module =
+            unsafe { ShaderModule::new(ctx.device.clone(), ShaderModuleCreateInfo::new(&words)) }
+                .context("failed to create shader module from orb.spv")?;
         let entry_point = module
             .entry_point("main")
             .context("orb.spv has no `main` entry point")?;
@@ -82,14 +79,8 @@ impl OrbPass {
             ds_allocator,
             pipeline.layout().set_layouts()[0].clone(),
             [
-                WriteDescriptorSet::image_view(
-                    0,
-                    ImageView::new_default(input_image)?,
-                ),
-                WriteDescriptorSet::image_view(
-                    1,
-                    ImageView::new_default(output_image.clone())?,
-                ),
+                WriteDescriptorSet::image_view(0, ImageView::new_default(input_image)?),
+                WriteDescriptorSet::image_view(1, ImageView::new_default(output_image.clone())?),
             ],
             [],
         )?;

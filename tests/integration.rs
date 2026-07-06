@@ -92,8 +92,7 @@ struct Tester {
     current: usize,
     rcx: Option<RenderContext>,
     start_time: SystemTime,
-    frame_count: u64,
-    fps_time: SystemTime,
+    fps: photon_slam::fps::FpsCounter,
 }
 
 impl Tester {
@@ -129,8 +128,7 @@ impl Tester {
             current: 0,
             rcx: None,
             start_time: SystemTime::now(),
-            frame_count: 0,
-            fps_time: SystemTime::now(),
+            fps: photon_slam::fps::FpsCounter::new(),
         })
     }
 
@@ -244,15 +242,7 @@ impl ApplicationHandler for Tester {
                     None => return,
                 };
 
-                // FPS counter.
-                self.frame_count += 1;
-                let elapsed = self.fps_time.elapsed().unwrap();
-                if elapsed >= std::time::Duration::from_secs(1) {
-                    let fps = self.frame_count as f64 / elapsed.as_secs_f64();
-                    println!("  fps: {fps:.1}");
-                    self.frame_count = 0;
-                    self.fps_time = SystemTime::now();
-                }
+                self.fps.tick();
 
                 let result = swapchain::acquire_next_image(rcx.swapchain.clone(), None);
                 let mut cmd = AutoCommandBufferBuilder::primary(

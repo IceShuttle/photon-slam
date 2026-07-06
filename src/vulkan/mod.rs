@@ -4,6 +4,8 @@ pub mod context;
 pub mod disp;
 /// Handles things related to Image
 pub mod image;
+/// Contains shader helper structs to dispatch them through a command buffer
+///
 /// Feature extraction compute passes (FAST, ORB, …)
 pub mod shaders;
 /// Handles things regarding Initialization

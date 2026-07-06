@@ -314,8 +314,8 @@ impl ApplicationHandler for Tester {
 // Test entry point
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "manual")]
 #[test]
+#[ignore]
 fn human_in_loop_shader_test() {
     let event_loop = {
         #[cfg(target_os = "linux")]

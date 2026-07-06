@@ -21,7 +21,6 @@ use vulkano::{
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct FastInputs {
-    pub time: u32,
     pub threshold: f32,
 }
 

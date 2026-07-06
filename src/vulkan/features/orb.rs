@@ -29,7 +29,10 @@ pub struct OrbPass {
 
 impl OrbPass {
     /// Build the ORB orientation pipeline and descriptor set.
-    pub fn new(ctx: &VulkanContext, input_image: Arc<Image>) -> Result<Self> {
+    ///
+    /// `fast_output` is the output image from the FAST-9 pass, used as a
+    /// mask so orientation is only computed at detected corner pixels.
+    pub fn new(ctx: &VulkanContext, input_image: Arc<Image>, fast_output: Arc<Image>) -> Result<Self> {
         let extent = input_image.extent();
 
         // --- orientation output image ---
@@ -81,6 +84,7 @@ impl OrbPass {
             [
                 WriteDescriptorSet::image_view(0, ImageView::new_default(input_image)?),
                 WriteDescriptorSet::image_view(1, ImageView::new_default(output_image.clone())?),
+                WriteDescriptorSet::image_view(2, ImageView::new_default(fast_output)?),
             ],
             [],
         )?;
@@ -92,16 +96,13 @@ impl OrbPass {
         })
     }
 
-    /// Record pipeline bind, push constant `time`, descriptor bind, and
-    /// compute dispatch.
+    /// Record pipeline bind, descriptor bind, and compute dispatch.
     pub fn dispatch(
         &self,
         cmd: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-        time: u32,
         group_counts: [u32; 3],
     ) -> Result<()> {
         cmd.bind_pipeline_compute(self.pipeline.clone())?;
-        cmd.push_constants(self.pipeline.layout().clone(), 0, time)?;
         cmd.bind_descriptor_sets(
             PipelineBindPoint::Compute,
             self.pipeline.layout().clone(),

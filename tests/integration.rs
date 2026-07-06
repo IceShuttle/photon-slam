@@ -70,13 +70,10 @@ impl ShaderPass {
             ShaderPass::Compute(p) => p.dispatch(cmd, time, groups),
             ShaderPass::Fast(p) => p.dispatch(
                 cmd,
-                FastInputs {
-                    time,
-                    threshold: 0.15,
-                },
+                FastInputs { threshold: 0.15 },
                 groups,
             ),
-            ShaderPass::Orb(p) => p.dispatch(cmd, time, groups),
+            ShaderPass::Orb(p) => p.dispatch(cmd, groups),
         }
     }
 
@@ -99,6 +96,8 @@ struct Tester {
     current: usize,
     rcx: Option<RenderContext>,
     start_time: SystemTime,
+    frame_count: u64,
+    fps_time: SystemTime,
 }
 
 impl Tester {
@@ -120,19 +119,22 @@ impl Tester {
                 .flush()?;
         }
 
-        // Build every pass upfront.
+        // Build all passes upfront, chaining FAST output into ORB.
+        let fast_pass = FastPass::new(&ctx, texture.clone())?;
+        let orb_pass = OrbPass::new(&ctx, texture.clone(), fast_pass.output_image.clone())?;
         let passes = vec![
-            ShaderPass::Compute(ComputePass::new(&ctx, texture.clone())?),
-            ShaderPass::Fast(FastPass::new(&ctx, texture.clone())?),
-            ShaderPass::Orb(OrbPass::new(&ctx, texture)?),
+            ShaderPass::Compute(ComputePass::new(&ctx, texture)?),
+            ShaderPass::Fast(fast_pass),
+            ShaderPass::Orb(orb_pass),
         ];
-
         Ok(Self {
             ctx,
             passes,
             current: 0,
             rcx: None,
             start_time: SystemTime::now(),
+            frame_count: 0,
+            fps_time: SystemTime::now(),
         })
     }
 
@@ -245,6 +247,16 @@ impl ApplicationHandler for Tester {
                     Some(v) => v,
                     None => return,
                 };
+
+                // FPS counter.
+                self.frame_count += 1;
+                let elapsed = self.fps_time.elapsed().unwrap();
+                if elapsed >= std::time::Duration::from_secs(1) {
+                    let fps = self.frame_count as f64 / elapsed.as_secs_f64();
+                    println!("  fps: {fps:.1}");
+                    self.frame_count = 0;
+                    self.fps_time = SystemTime::now();
+                }
 
                 let result = swapchain::acquire_next_image(rcx.swapchain.clone(), None);
                 let mut cmd = AutoCommandBufferBuilder::primary(

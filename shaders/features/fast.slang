@@ -11,8 +11,7 @@ Texture2D<float4> inputTexture;
 RWTexture2D<float4> outputTexture;
 
 struct ShaderInputs {
-    uint32_t time;       // unused, kept for uniform layout compatibility
-    float threshold;     // intensity difference threshold
+    float threshold;
 };
 
 [[vk::push_constant]] ShaderInputs s_inp;

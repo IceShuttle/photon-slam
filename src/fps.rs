@@ -26,7 +26,7 @@ impl FpsCounter {
         let elapsed = self.last_log.elapsed();
         if elapsed >= LOG_INTERVAL {
             let fps = self.frame_count as f64 / elapsed.as_secs_f64();
-            tracing::debug!(
+            tracing::info!(
                 fps = fps,
                 frames = self.frame_count,
                 elapsed_ms = elapsed.as_millis() as u64,

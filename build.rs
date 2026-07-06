@@ -6,18 +6,14 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let out_path = Path::new(&out_dir);
 
-    // Main visual-test shader.
-    compile_shader(
-        &shader_dir.join("compute.slang"),
-        &out_path.join("compute.spv"),
-    );
-
-    // Feature-extraction shaders: every .slang under shaders/features/.
-    let feature_dir = shader_dir.join("features");
-    if let Ok(entries) = std::fs::read_dir(&feature_dir) {
+    // Compile every entry-point .slang in the flat shaders/ directory.
+    // math.slang is a module (imported, not an entry point) — skip it.
+    if let Ok(entries) = std::fs::read_dir(shader_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "slang") {
+            if path.extension().is_some_and(|e| e == "slang")
+                && path.file_stem().unwrap() != "math"
+            {
                 let stem = path.file_stem().unwrap().to_str().unwrap();
                 compile_shader(&path, &out_path.join(format!("{stem}.spv")));
             }

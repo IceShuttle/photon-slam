@@ -1,14 +1,15 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use vulkano::{
+    VulkanLibrary,
     command_buffer::allocator::{CommandBufferAllocator, StandardCommandBufferAllocator},
     device::{Device, Queue, QueueFlags, physical::PhysicalDevice},
-    instance::Instance,
+    instance::{Instance, InstanceCreateInfo},
     memory::allocator::StandardMemoryAllocator,
-    VulkanLibrary,
 };
 use winit::event_loop::EventLoop;
 
+use crate::vulkan::system::get_instance_create_info;
 /// Shared Vulkan infrastructure: instance, device, queue, allocators.
 ///
 /// Created once during startup and borrowed by all subsystems.
@@ -26,9 +27,12 @@ impl VulkanContext {
     /// physical device, create a logical device, and set up allocators.
     ///
     /// `event_loop` is needed to query platform-specific surface extensions.
-    pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
+    pub fn new(event_loop: Option<&EventLoop<()>>) -> Result<Self> {
         let library = VulkanLibrary::new().context("Vulkan loader/dll not found")?;
-        let instance_create_info = crate::vulkan::system::get_instance_create_info(event_loop)?;
+        let instance_create_info = match event_loop {
+            Some(val) => get_instance_create_info(val)?,
+            None => InstanceCreateInfo::default(),
+        };
         let instance = Instance::new(library, instance_create_info)?;
 
         let physical_device = instance
@@ -43,7 +47,8 @@ impl VulkanContext {
             .queue_family_properties()
             .iter()
             .position(|qfp| qfp.queue_flags.contains(QueueFlags::COMPUTE))
-            .context("couldn't find a compute queue family")? as u32;
+            .context("couldn't find a compute queue family")?
+            as u32;
 
         let (device, mut queues) = crate::vulkan::system::create_logical_device(
             physical_device.clone(),
@@ -52,8 +57,7 @@ impl VulkanContext {
 
         let queue = queues.next().context("no compute queue found")?;
 
-        let memory_allocator =
-            Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+        let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
         let cmd_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
             Default::default(),

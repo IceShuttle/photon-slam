@@ -22,8 +22,7 @@ use photon_slam::vulkan::{
 
 use vulkano::{
     command_buffer::{
-        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage,
-        PrimaryAutoCommandBuffer,
+        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, PrimaryAutoCommandBuffer,
     },
     image::Image,
     swapchain::{self, SwapchainPresentInfo},
@@ -69,9 +68,14 @@ impl ShaderPass {
     ) -> anyhow::Result<()> {
         match self {
             ShaderPass::Compute(p) => p.dispatch(cmd, time, groups),
-            ShaderPass::Fast(p) => {
-                p.dispatch(cmd, FastInputs { time, threshold: 0.15 }, groups)
-            }
+            ShaderPass::Fast(p) => p.dispatch(
+                cmd,
+                FastInputs {
+                    time,
+                    threshold: 0.15,
+                },
+                groups,
+            ),
             ShaderPass::Orb(p) => p.dispatch(cmd, time, groups),
         }
     }
@@ -99,7 +103,7 @@ struct Tester {
 
 impl Tester {
     fn new(event_loop: &EventLoop<()>) -> anyhow::Result<Self> {
-        let ctx = VulkanContext::new(event_loop)?;
+        let ctx = VulkanContext::new(Some(event_loop))?;
 
         // Upload the test image once.  All passes share the same input.
         let mut uploads = AutoCommandBufferBuilder::primary(
@@ -157,12 +161,7 @@ impl ApplicationHandler for Tester {
         println!("Click the window, then press  y  to pass this shader,  n  to fail.");
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _id: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -192,12 +191,14 @@ impl ApplicationHandler for Tester {
                 // logical_key::Character for platforms that don't populate `text`.
                 let accept = || {
                     let from_text = text.as_deref().is_some_and(|t| t == "y" || t == "Y");
-                    let from_key = matches!(&key, winit::keyboard::Key::Character(c) if c == "y" || c == "Y");
+                    let from_key =
+                        matches!(&key, winit::keyboard::Key::Character(c) if c == "y" || c == "Y");
                     from_text || from_key
                 };
                 let reject = || {
                     let from_text = text.as_deref().is_some_and(|t| t == "n" || t == "N");
-                    let from_key = matches!(&key, winit::keyboard::Key::Character(c) if c == "n" || c == "N");
+                    let from_key =
+                        matches!(&key, winit::keyboard::Key::Character(c) if c == "n" || c == "N");
                     from_text || from_key
                 };
 
@@ -214,9 +215,7 @@ impl ApplicationHandler for Tester {
                             self.passes.len(),
                             self.active().label()
                         );
-                        println!(
-                            "Click the window, then press  y  to pass,  n  to fail."
-                        );
+                        println!("Click the window, then press  y  to pass,  n  to fail.");
                         if let Some(rcx) = self.rcx.as_ref() {
                             rcx.window.request_redraw();
                         }
@@ -262,9 +261,7 @@ impl ApplicationHandler for Tester {
                     .duration_since(self.start_time)
                     .unwrap()
                     .as_millis() as u32;
-                self.active()
-                    .dispatch(&mut cmd, groups, elapsed)
-                    .unwrap();
+                self.active().dispatch(&mut cmd, groups, elapsed).unwrap();
 
                 let (img_idx, _, acquire_future) = match result {
                     Ok(v) => v,
@@ -294,10 +291,7 @@ impl ApplicationHandler for Tester {
                 let _ = swapchain::present(
                     future,
                     self.ctx.queue.clone(),
-                    SwapchainPresentInfo::swapchain_image_index(
-                        rcx.swapchain.clone(),
-                        img_idx,
-                    ),
+                    SwapchainPresentInfo::swapchain_image_index(rcx.swapchain.clone(), img_idx),
                 )
                 .then_signal_fence_and_flush();
 

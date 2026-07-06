@@ -32,7 +32,7 @@ impl App {
     /// Create the app: initialise Vulkan, upload the test image, and build
     /// the compute pipeline.
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
-        let ctx = VulkanContext::new(event_loop)?;
+        let ctx = VulkanContext::new(Some(event_loop))?;
 
         // Upload the compile-time-embedded test image to the GPU.
         let mut uploads = AutoCommandBufferBuilder::primary(

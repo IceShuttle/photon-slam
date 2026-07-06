@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 use vulkano::{
     device::{Device, physical::PhysicalDevice},
     format::Format,
     image::{Image, ImageUsage},
     instance::Instance,
-    swapchain::{Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo},
+    swapchain::{PresentMode, Surface, SurfaceInfo, Swapchain, SwapchainCreateInfo},
 };
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
@@ -32,11 +32,6 @@ impl RenderContext {
         let caps = physical_device.surface_capabilities(&surface, Default::default())?;
 
         let dimensions = window.inner_size();
-        let composite_alpha = caps
-            .supported_composite_alpha
-            .into_iter()
-            .next()
-            .context("No composite alpha supported")?;
 
         let formats = physical_device.surface_formats(&surface, SurfaceInfo::default())?;
 
@@ -53,16 +48,16 @@ impl RenderContext {
             }
         };
         tracing::debug!("Selected Format: {:?}", image_format);
-
+        let present_mode = Self::get_present_mode(physical_device, &surface)?;
         let (swapchain, swapchain_images) = Swapchain::new(
             device.clone(),
             surface.clone(),
             SwapchainCreateInfo {
-                min_image_count: caps.min_image_count + 1, // How many buffers to use in the swapchain
+                min_image_count: caps.min_image_count + 1,
                 image_format,
                 image_extent: dimensions.into(),
-                image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST, // What the images are going to be used for
-                composite_alpha,
+                image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
+                present_mode,
                 ..Default::default()
             },
         )?;
@@ -72,5 +67,21 @@ impl RenderContext {
             swapchain,
             swapchain_images,
         })
+    }
+    fn get_present_mode(
+        physical_device: Arc<PhysicalDevice>,
+        surface: &Surface,
+    ) -> Result<PresentMode> {
+        let present_modes = physical_device.surface_present_modes(surface, Default::default())?;
+        let present_mode = if present_modes.contains(&PresentMode::Mailbox) {
+            tracing::info!("Mailbox selected");
+            PresentMode::Mailbox
+        } else if present_modes.contains(&PresentMode::Fifo) {
+            tracing::info!("Mailbox selected");
+            PresentMode::Mailbox
+        } else {
+            PresentMode::Immediate
+        };
+        Ok(present_mode)
     }
 }

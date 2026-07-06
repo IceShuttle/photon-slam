@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use vulkano::device::Device;
-use vulkano::device::physical::PhysicalDevice;
 use vulkano::{
+    device::{Device, physical::PhysicalDevice},
     format::Format,
     image::{Image, ImageUsage},
     instance::Instance,

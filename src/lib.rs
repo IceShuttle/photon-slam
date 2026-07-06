@@ -20,9 +20,6 @@ use winit::{
     platform::android::EventLoopBuilderExtAndroid,
 };
 
-#[cfg(target_os = "android")]
-mod window;
-
 /// Tells wether it is being compiled for android or not!
 pub const IS_ANDROID: bool = cfg!(target_os = "android");
 #[cfg(target_os = "android")]

@@ -11,8 +11,7 @@ fn main() {
     if let Ok(entries) = std::fs::read_dir(shader_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "slang")
-                && path.file_stem().unwrap() != "math"
+            if path.extension().is_some_and(|e| e == "slang") && path.file_stem().unwrap() != "math"
             {
                 let stem = path.file_stem().unwrap().to_str().unwrap();
                 compile_shader(&path, &out_path.join(format!("{stem}.spv")));

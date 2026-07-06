@@ -17,11 +17,11 @@ use photon_slam::{
         self,
         context::VulkanContext,
         disp::RenderContext,
-        features::{
+        pipeline::ComputePass,
+        shaders::{
             fast::{FastInputs, FastPass},
             orb::OrbPass,
         },
-        pipeline::ComputePass,
     },
 };
 

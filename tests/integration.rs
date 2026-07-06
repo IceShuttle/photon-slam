@@ -17,10 +17,10 @@ use photon_slam::{
         self,
         context::VulkanContext,
         disp::RenderContext,
-        pipeline::ComputePass,
         shaders::{
             fast::{FastInputs, FastPass},
             orb::OrbPass,
+            testing::TestingPass,
         },
     },
 };
@@ -51,7 +51,7 @@ use winit::platform::x11::EventLoopBuilderExtX11;
 // ---------------------------------------------------------------------------
 
 enum ShaderPass {
-    Compute(ComputePass),
+    Test(TestingPass),
     Fast(FastPass),
     Orb(OrbPass),
 }
@@ -59,7 +59,7 @@ enum ShaderPass {
 impl ShaderPass {
     fn output_image(&self) -> &Arc<Image> {
         match self {
-            ShaderPass::Compute(p) => &p.output_image,
+            ShaderPass::Test(p) => &p.output_image,
             ShaderPass::Fast(p) => &p.output_image,
             ShaderPass::Orb(p) => &p.output_image,
         }
@@ -72,7 +72,7 @@ impl ShaderPass {
         time: u32,
     ) -> anyhow::Result<()> {
         match self {
-            ShaderPass::Compute(p) => p.dispatch(cmd, time, groups),
+            ShaderPass::Test(p) => p.dispatch(cmd, time, groups),
             ShaderPass::Fast(p) => p.dispatch(cmd, FastInputs { threshold: 0.15 }, groups),
             ShaderPass::Orb(p) => p.dispatch(cmd, groups),
         }
@@ -80,7 +80,7 @@ impl ShaderPass {
 
     fn label(&self) -> &'static str {
         match self {
-            ShaderPass::Compute(_) => "compute (Gaussian blur + colour shift)",
+            ShaderPass::Test(_) => "test (Gaussian blur + colour shift)",
             ShaderPass::Fast(_) => "FAST-9 corner detection",
             ShaderPass::Orb(_) => "ORB intensity-centroid orientation",
         }
@@ -123,7 +123,7 @@ impl Tester {
         let fast_pass = FastPass::new(&ctx, texture.clone())?;
         let orb_pass = OrbPass::new(&ctx, texture.clone(), fast_pass.output_image.clone())?;
         let passes = vec![
-            ShaderPass::Compute(ComputePass::new(&ctx, texture)?),
+            ShaderPass::Test(TestingPass::new(&ctx, texture)?),
             ShaderPass::Fast(fast_pass),
             ShaderPass::Orb(orb_pass),
         ];

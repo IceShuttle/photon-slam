@@ -2,3 +2,5 @@
 pub mod fast;
 /// ORB intensity-centroid orientation compute pass.
 pub mod orb;
+/// Testing shader
+pub mod testing;

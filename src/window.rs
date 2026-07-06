@@ -1,6 +1,6 @@
 use crate::{
     fps::FpsCounter,
-    vulkan::{self, context::VulkanContext, disp::RenderContext, pipeline::ComputePass},
+    vulkan::{self, context::VulkanContext, disp::RenderContext, shaders::testing::TestingPass},
 };
 use anyhow::Result;
 use std::time::SystemTime;
@@ -22,7 +22,7 @@ use winit::{
 /// Owns the Vulkan context, the compute pass, and the on-screen display.
 pub struct App {
     vk_context: VulkanContext,
-    pass: ComputePass,
+    pass: TestingPass,
     rcx: Option<RenderContext>,
     fps: FpsCounter,
     start_time: SystemTime,
@@ -50,7 +50,7 @@ impl App {
             tracing::debug!("Image uploaded");
         }
 
-        let pass = ComputePass::new(&ctx, texture)?;
+        let pass = TestingPass::new(&ctx, texture)?;
 
         Ok(Self {
             vk_context: ctx,

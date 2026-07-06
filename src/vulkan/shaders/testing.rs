@@ -29,13 +29,13 @@ struct ShaderInputs {
 /// Created once after the input texture is uploaded.  [`Self::dispatch`]
 /// records the pipeline-bind, push-constants, descriptor-bind, and
 /// dispatch commands into a caller-supplied command buffer.
-pub struct ComputePass {
+pub struct TestingPass {
     pub pipeline: Arc<ComputePipeline>,
     pub descriptor_set: Arc<DescriptorSet>,
     pub output_image: Arc<Image>,
 }
 
-impl ComputePass {
+impl TestingPass {
     /// Build the pipeline and descriptor set from the compiled SPIR-V.
     ///
     /// `input_image` is bound at set-0 binding-0; the internally-created

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 use vulkano::{
     device::{Device, physical::PhysicalDevice},
@@ -47,6 +47,12 @@ impl RenderContext {
                 formats[0].0
             }
         };
+
+        let composite_alpha = caps
+            .supported_composite_alpha
+            .into_iter()
+            .next()
+            .context("No composite alpha supporte")?;
         tracing::debug!("Selected Format: {:?}", image_format);
         let present_mode = Self::get_present_mode(physical_device, &surface)?;
         let (swapchain, swapchain_images) = Swapchain::new(
@@ -56,6 +62,7 @@ impl RenderContext {
                 min_image_count: caps.min_image_count + 1,
                 image_format,
                 image_extent: dimensions.into(),
+                composite_alpha,
                 image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST,
                 present_mode,
                 ..Default::default()

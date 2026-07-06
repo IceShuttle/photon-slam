@@ -11,6 +11,9 @@ pub mod vulkan;
 /// Creates Window for Display
 pub mod window;
 
+/// General Utils
+pub mod utils;
+
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 

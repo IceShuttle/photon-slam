@@ -11,13 +11,18 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use photon_slam::vulkan::{
-    self,
-    context::VulkanContext,
-    disp::RenderContext,
-    features::fast::{FastInputs, FastPass},
-    features::orb::OrbPass,
-    pipeline::ComputePass,
+use photon_slam::{
+    utils::tracing::setup_tracing,
+    vulkan::{
+        self,
+        context::VulkanContext,
+        disp::RenderContext,
+        features::{
+            fast::{FastInputs, FastPass},
+            orb::OrbPass,
+        },
+        pipeline::ComputePass,
+    },
 };
 
 use vulkano::{
@@ -307,6 +312,7 @@ impl ApplicationHandler for Tester {
 #[test]
 #[ignore]
 fn human_in_loop_shader_test() {
+    setup_tracing();
     let event_loop = {
         #[cfg(target_os = "linux")]
         {

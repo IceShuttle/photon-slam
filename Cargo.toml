@@ -18,7 +18,7 @@ android_logger = "0.13"
 android-activity = { version = "0.6", features = ["native-activity"] }
 
 [lib]
-crate-type = ["cdylib","rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [package.metadata.android]
 # The minimum API level your app will run on (e.g., 21 for Android 5.0)

@@ -32,7 +32,11 @@ impl OrbPass {
     ///
     /// `fast_output` is the output image from the FAST-9 pass, used as a
     /// mask so orientation is only computed at detected corner pixels.
-    pub fn new(ctx: &VulkanContext, input_image: Arc<Image>, fast_output: Arc<Image>) -> Result<Self> {
+    pub fn new(
+        ctx: &VulkanContext,
+        input_image: Arc<Image>,
+        fast_output: Arc<Image>,
+    ) -> Result<Self> {
         let extent = input_image.extent();
 
         // --- orientation output image ---

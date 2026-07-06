@@ -68,11 +68,7 @@ impl ShaderPass {
     ) -> anyhow::Result<()> {
         match self {
             ShaderPass::Compute(p) => p.dispatch(cmd, time, groups),
-            ShaderPass::Fast(p) => p.dispatch(
-                cmd,
-                FastInputs { threshold: 0.15 },
-                groups,
-            ),
+            ShaderPass::Fast(p) => p.dispatch(cmd, FastInputs { threshold: 0.15 }, groups),
             ShaderPass::Orb(p) => p.dispatch(cmd, groups),
         }
     }
@@ -318,6 +314,7 @@ impl ApplicationHandler for Tester {
 // Test entry point
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "manual")]
 #[test]
 fn human_in_loop_shader_test() {
     let event_loop = {

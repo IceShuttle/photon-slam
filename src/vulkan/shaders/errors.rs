@@ -6,4 +6,3 @@ pub enum ShaderDispatchError {
     #[error(transparent)]
     VulkanValidation(#[from] Box<vulkano::ValidationError>),
 }
-

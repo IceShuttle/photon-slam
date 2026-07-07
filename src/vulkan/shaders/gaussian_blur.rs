@@ -1,7 +1,7 @@
 use super::errors::ShaderDispatchError;
 use crate::vulkan::context::VulkanContext;
 use anyhow::{Context, Result};
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{

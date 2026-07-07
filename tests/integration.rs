@@ -19,6 +19,7 @@ use photon_slam::{
         disp::RenderContext,
         shaders::{
             fast::{FastInputs, FastPass},
+            gaussian_blur::{GaussianBlurInputs, GaussianBlurPass},
             orb::OrbPass,
             testing::TestingPass,
         },
@@ -53,6 +54,7 @@ use winit::platform::x11::EventLoopBuilderExtX11;
 enum ShaderPass {
     Test(TestingPass),
     Fast(FastPass),
+    GaussianBlur(GaussianBlurPass),
     Orb(OrbPass),
 }
 
@@ -61,6 +63,7 @@ impl ShaderPass {
         match self {
             ShaderPass::Test(p) => &p.output_image,
             ShaderPass::Fast(p) => &p.output_image,
+            ShaderPass::GaussianBlur(p) => &p.output_image,
             ShaderPass::Orb(p) => &p.output_image,
         }
     }
@@ -74,6 +77,14 @@ impl ShaderPass {
         match self {
             ShaderPass::Test(p) => p.dispatch(cmd, time, groups),
             ShaderPass::Fast(p) => p.dispatch(cmd, FastInputs { threshold: 0.15 }, groups),
+            ShaderPass::GaussianBlur(p) => Ok(p.dispatch(
+                cmd,
+                GaussianBlurInputs {
+                    sigma: 1.5,
+                    kernel_size: 11,
+                },
+                groups,
+            )?),
             ShaderPass::Orb(p) => p.dispatch(cmd, groups),
         }
     }
@@ -82,6 +93,7 @@ impl ShaderPass {
         match self {
             ShaderPass::Test(_) => "test (Gaussian blur + colour shift)",
             ShaderPass::Fast(_) => "FAST-9 corner detection",
+            ShaderPass::GaussianBlur(_) => "Gaussian blur",
             ShaderPass::Orb(_) => "ORB intensity-centroid orientation",
         }
     }
@@ -122,8 +134,10 @@ impl Tester {
         // Build all passes upfront, chaining FAST output into ORB.
         let fast_pass = FastPass::new(&ctx, texture.clone())?;
         let orb_pass = OrbPass::new(&ctx, texture.clone(), fast_pass.output_image.clone())?;
+        let gaussian_blur_pass = GaussianBlurPass::new(&ctx, texture.clone())?;
         let passes = vec![
             ShaderPass::Test(TestingPass::new(&ctx, texture)?),
+            ShaderPass::GaussianBlur(gaussian_blur_pass),
             ShaderPass::Fast(fast_pass),
             ShaderPass::Orb(orb_pass),
         ];

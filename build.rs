@@ -2,6 +2,8 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    // Re-run when shaders/ directory changes (new files added/removed).
+    println!("cargo:rerun-if-changed=shaders/");
     let shader_dir = Path::new("shaders");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let out_path = Path::new(&out_dir);

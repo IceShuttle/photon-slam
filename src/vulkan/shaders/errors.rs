@@ -1,3 +1,4 @@
+/// Errors that occur while dispatch
 #[derive(Debug, thiserror::Error)]
 pub enum ShaderDispatchError {
     #[error("invalid input: {0}")]

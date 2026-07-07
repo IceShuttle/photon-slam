@@ -1,3 +1,4 @@
+use super::errors::ShaderDispatchError;
 use crate::vulkan::context::VulkanContext;
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -105,7 +106,7 @@ impl OrbPass {
         &self,
         cmd: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         group_counts: [u32; 3],
-    ) -> Result<()> {
+    ) -> Result<(), ShaderDispatchError> {
         cmd.bind_pipeline_compute(self.pipeline.clone())?;
         cmd.bind_descriptor_sets(
             PipelineBindPoint::Compute,

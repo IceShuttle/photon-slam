@@ -1,3 +1,4 @@
+use super::errors::ShaderDispatchError;
 use crate::vulkan::context::VulkanContext;
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -107,7 +108,7 @@ impl FastPass {
         cmd: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         inputs: FastInputs,
         group_counts: [u32; 3],
-    ) -> Result<()> {
+    ) -> Result<(), ShaderDispatchError> {
         cmd.bind_pipeline_compute(self.pipeline.clone())?;
         cmd.push_constants(self.pipeline.layout().clone(), 0, inputs)?;
         cmd.bind_descriptor_sets(

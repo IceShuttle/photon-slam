@@ -18,6 +18,7 @@ use photon_slam::{
         context::VulkanContext,
         disp::RenderContext,
         shaders::{
+            errors::ShaderDispatchError,
             fast::{FastInputs, FastPass},
             gaussian_blur::{GaussianBlurInputs, GaussianBlurPass},
             orb::OrbPass,
@@ -73,18 +74,18 @@ impl ShaderPass {
         cmd: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         groups: [u32; 3],
         time: u32,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), ShaderDispatchError> {
         match self {
             ShaderPass::Test(p) => p.dispatch(cmd, time, groups),
             ShaderPass::Fast(p) => p.dispatch(cmd, FastInputs { threshold: 0.15 }, groups),
-            ShaderPass::GaussianBlur(p) => Ok(p.dispatch(
+            ShaderPass::GaussianBlur(p) => p.dispatch(
                 cmd,
                 GaussianBlurInputs {
                     sigma: 1.5,
                     kernel_size: 11,
                 },
                 groups,
-            )?),
+            ),
             ShaderPass::Orb(p) => p.dispatch(cmd, groups),
         }
     }

@@ -1,5 +1,5 @@
 {
-  description = "A Vulkan based VIO";
+  description = "A Vulkan based SLAM";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixpkgs-unstable";
@@ -117,13 +117,13 @@
       commonArgsNative = commonArgs pkgs;
       commonArgsArm64 = commonArgs arm64Pkgs;
 
-      photon-vio = craneLib.buildPackage (
+      photon-slam = craneLib.buildPackage (
         commonArgsNative
         // {
           cargoArtifacts = craneLib.buildDepsOnly commonArgsNative;
         }
       );
-      arm64-photon-vio = arm64-craneLib.buildPackage (
+      arm64-photon-slam = arm64-craneLib.buildPackage (
         commonArgsArm64
         // {
           cargoArtifacts = craneLib.buildDepsOnly commonArgsArm64;
@@ -131,20 +131,20 @@
         }
       );
 
-      photon-vio-wrapped = pkgs.writeShellScriptBin "photon-vio" ''
+      photon-slam-wrapped = pkgs.writeShellScriptBin "photon-slam" ''
         export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs_system}:$LD_LIBRARY_PATH
-        exec ${photon-vio}/bin/photon-vio "$@"
+        exec ${photon-slam}/bin/photon-slam "$@"
       '';
     in {
       checks = {
-        inherit photon-vio;
+        inherit photon-slam;
       };
 
-      packages.default = photon-vio;
-      packages.arm64-linux = arm64-photon-vio;
+      packages.default = photon-slam;
+      packages.arm64-linux = arm64-photon-slam;
 
       apps.default = flake-utils.lib.mkApp {
-        drv = photon-vio-wrapped;
+        drv = photon-slam-wrapped;
       };
 
       devShells.default = craneLib.devShell {

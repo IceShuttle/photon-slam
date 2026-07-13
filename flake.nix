@@ -25,19 +25,24 @@
         config.allowUnfree = true;
         config.android_sdk.accept_license = true;
       };
-
-      libs = with pkgs; [
-        libxkbcommon
-        wayland
-        libGL
-        vulkan-loader
-        libX11
-        libXcursor
-        libXi
-      ];
+      arm64Pkgs = import nixpkgs {
+        localSystem = {inherit system;};
+        crossSystem = {
+          config = "aarch64-unknown-linux-gnu";
+        };
+        config = {
+          allowUnfree = true;
+          android_sdk.accept_license = true;
+        };
+      };
 
       fenixPkgs = fenix.packages.${system};
       rustToolchain = fenixPkgs.stable.toolchain;
+      arm64-rust = with fenixPkgs;
+        combine [
+          stable.toolchain
+          targets.aarch64-unknown-linux-gnu.stable.rust-std
+        ];
       android-rust = with fenixPkgs;
         combine [
           stable.toolchain
@@ -46,6 +51,7 @@
         ];
 
       craneLib = (crane.mkLib nixpkgs.legacyPackages.${system}).overrideToolchain rustToolchain;
+      arm64-craneLib = (crane.mkLib arm64Pkgs).overrideToolchain arm64-rust;
       android-craneLib = (crane.mkLib nixpkgs.legacyPackages.${system}).overrideToolchain android-rust;
 
       androidEnv = pkgs.androidenv.override {licenseAccepted = true;};
@@ -81,30 +87,52 @@
             || pkgs.lib.hasPrefix ".cargo" baseName;
 
           shaderInclude = pkgs.lib.hasSuffix ".slang" baseName;
+          imgInclude = pkgs.lib.hasSuffix ".jpg" baseName;
         in
-          cargoInclude || shaderInclude;
+          cargoInclude || shaderInclude || imgInclude;
 
         src = ./.;
       };
 
-      commonArgs = {
+      libs = pkgs:
+        with pkgs; [
+          libxkbcommon
+          wayland
+          libGL
+          vulkan-loader
+          libX11
+          libXcursor
+          libXi
+        ];
+      libs_system = libs pkgs;
+
+      commonArgs = pkgs: {
         inherit src;
         strictDeps = true;
-        buildInputs = libs;
+        buildInputs = libs pkgs;
         nativeBuildInputs = [
           pkgs.shader-slang
         ];
       };
+      commonArgsNative = commonArgs pkgs;
+      commonArgsArm64 = commonArgs arm64Pkgs;
 
       photon-vio = craneLib.buildPackage (
-        commonArgs
+        commonArgsNative
         // {
-          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          cargoArtifacts = craneLib.buildDepsOnly commonArgsNative;
+        }
+      );
+      arm64-photon-vio = arm64-craneLib.buildPackage (
+        commonArgsArm64
+        // {
+          cargoArtifacts = craneLib.buildDepsOnly commonArgsArm64;
+          CARGO_BUILD_TARGET = "aarch64-unknown-linux-gnu";
         }
       );
 
       photon-vio-wrapped = pkgs.writeShellScriptBin "photon-vio" ''
-        export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs_system}:$LD_LIBRARY_PATH
         exec ${photon-vio}/bin/photon-vio "$@"
       '';
     in {
@@ -113,6 +141,7 @@
       };
 
       packages.default = photon-vio;
+      packages.arm64-linux = arm64-photon-vio;
 
       apps.default = flake-utils.lib.mkApp {
         drv = photon-vio-wrapped;
@@ -122,8 +151,8 @@
         checks = self.checks.${system};
 
         packages =
-          libs
-          ++ commonArgs.nativeBuildInputs
+          libs_system
+          ++ commonArgsNative.nativeBuildInputs
           ++ [
             rustToolchain
             pkgs.bacon
@@ -132,7 +161,7 @@
           ];
 
         shellHook = ''
-          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH;
+          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs_system}:$LD_LIBRARY_PATH;
           export RUST_SRC_PATH=${rustToolchain}/lib/rustlib/src/rust/library;
         '';
       };
@@ -141,8 +170,8 @@
         checks = self.checks.${system};
 
         packages =
-          libs
-          ++ commonArgs.nativeBuildInputs
+          libs_system
+          ++ commonArgsNative.nativeBuildInputs
           ++ android-sdk
           ++ [
             pkgs.bacon
@@ -151,7 +180,8 @@
           ];
 
         shellHook = ''
-          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}:$LD_LIBRARY_PATH;
+          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs_system}:$LD_LIBRARY_PATH;
+          export RUST_SRC_PATH=${android-rust}/lib/rustlib/src/rust/library;
           export ANDROID_HOME=${android.androidsdk}/libexec/android-sdk;
         '';
       };

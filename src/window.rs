@@ -32,28 +32,28 @@ impl App {
     /// Create the app: initialise Vulkan, upload the test image, and build
     /// the compute pipeline.
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
-        let ctx = VulkanContext::new(Some(event_loop))?;
+        let vk_context = VulkanContext::new(Some(event_loop))?;
 
         // Upload the compile-time-embedded test image to the GPU.
         let mut uploads = AutoCommandBufferBuilder::primary(
-            ctx.cmd_buffer_allocator.clone(),
-            ctx.queue.queue_family_index(),
+            vk_context.cmd_buffer_allocator.clone(),
+            vk_context.queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )?;
         let img = vulkan::image::load_image()?;
-        let texture = vulkan::image::upload_image(&ctx.memory_allocator, &mut uploads, img)?;
+        let texture = vulkan::image::upload_image(&vk_context.memory_allocator, &mut uploads, img)?;
         {
             let cmd_buff = uploads.build()?;
-            sync::now(ctx.device.clone())
-                .then_execute(ctx.queue.clone(), cmd_buff)?
+            sync::now(vk_context.device.clone())
+                .then_execute(vk_context.queue.clone(), cmd_buff)?
                 .flush()?;
             tracing::debug!("Image uploaded");
         }
 
-        let pass = TestingPass::new(&ctx, texture)?;
+        let pass = TestingPass::new(&vk_context, texture)?;
 
         Ok(Self {
-            vk_context: ctx,
+            vk_context,
             pass,
             rcx: None,
             fps: FpsCounter::new(),

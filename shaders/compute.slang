@@ -21,7 +21,6 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID) {
     return;
   uint2 pos = dispatchThreadID.xy;
   uint extra = (kernel_size - 1) / 2;
-  uint count = 0;
   float3 output = float3(0, 0, 0);
   int2 ptr;
 
@@ -32,9 +31,8 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID) {
       if (ptr.x < 0 || ptr.y < 0 || ptr.x >= dim.x || ptr.y >= dim.y)
         continue;
       float4 color = inputTexture.Load(int3(ptr, 0));
-      float2 diff = float2(pos - ptr) / (sigma * sqrt(2));
-      output += (color.rgb / exp(dot(diff, diff))) / (pow(sigma, 2) * 2 * PI);
-      count += 1;
+      float2 diff = float2(pos - ptr) / (sigma * sigma);
+      output += (color.rgb / exp(dot(diff, diff))) / (sigma * sigma * 2 * PI);
     }
   }
   uint2 centre = dim / 2;

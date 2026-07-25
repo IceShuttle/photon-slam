@@ -103,9 +103,6 @@
           libX11
           libXcursor
           libXi
-          libv4l
-          linuxHeaders
-          rustPlatform.bindgenHook
         ];
       libs_system = libs pkgs;
 
@@ -164,6 +161,7 @@
           ];
 
         shellHook = ''
+          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs_system}:$LD_LIBRARY_PATH;
           export RUST_SRC_PATH=${rustToolchain}/lib/rustlib/src/rust/library;
         '';
       };
@@ -182,6 +180,7 @@
           ];
 
         shellHook = ''
+          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs_system}:$LD_LIBRARY_PATH;
           export RUST_SRC_PATH=${android-rust}/lib/rustlib/src/rust/library;
           export ANDROID_HOME=${android.androidsdk}/libexec/android-sdk;
         '';

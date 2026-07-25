@@ -103,6 +103,9 @@
           libX11
           libXcursor
           libXi
+          libv4l
+          linuxHeaders
+          rustPlatform.bindgenHook
         ];
       libs_system = libs pkgs;
 

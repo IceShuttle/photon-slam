@@ -1,14 +1,18 @@
 use crate::{
     fps::FpsCounter,
-    vulkan::{self, context::VulkanContext, disp::RenderContext, shaders::testing::TestingPass},
+    utils::camera::{CameraCapture, CameraConfig},
+    vulkan::{context::VulkanContext, disp::RenderContext, shaders::yuvy_to_r8::YuvyToR8Pass},
 };
 use anyhow::Result;
 use std::time::SystemTime;
 
 use vulkano::{
-    command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage},
+    command_buffer::{
+        AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyImageToBufferInfo,
+    },
+    image::ImageLayout,
     swapchain::{self, SwapchainPresentInfo},
-    sync::{self, GpuFuture},
+    sync::GpuFuture,
 };
 use winit::{
     application::ApplicationHandler,
@@ -19,50 +23,41 @@ use winit::{
 
 /// Top-level application state.
 ///
-/// Owns the Vulkan context, the compute pass, and the on-screen display.
-pub struct App {
+/// Owns the Vulkan context, the YUVY→R8 compute pass, the camera, and the
+/// on-screen display.
+pub struct App<'a> {
     vk_context: VulkanContext,
-    pass: TestingPass,
+    pass: YuvyToR8Pass,
     rcx: Option<RenderContext>,
     fps: FpsCounter,
-    start_time: SystemTime,
+    _start_time: SystemTime,
+    cam: CameraCapture<'a>,
 }
 
-impl App {
-    /// Create the app: initialise Vulkan, upload the test image, and build
-    /// the compute pipeline.
+impl App<'_> {
+    /// Create the app: initialise Vulkan, create the camera, build the
+    /// YUVY→R8 compute pipeline.
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
         let vk_context = VulkanContext::new(Some(event_loop))?;
 
-        // Upload the compile-time-embedded test image to the GPU.
-        let mut uploads = AutoCommandBufferBuilder::primary(
-            vk_context.cmd_buffer_allocator.clone(),
-            vk_context.queue.queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )?;
-        let img = vulkan::image::load_image()?;
-        let texture = vulkan::image::upload_image(&vk_context.memory_allocator, &mut uploads, img)?;
-        {
-            let cmd_buff = uploads.build()?;
-            sync::now(vk_context.device.clone())
-                .then_execute(vk_context.queue.clone(), cmd_buff)?
-                .flush()?;
-            tracing::debug!("Image uploaded");
-        }
+        // Camera first — we need its dimensions for the pass.
+        let cam = CameraCapture::new(&vk_context, &CameraConfig::default())?;
 
-        let pass = TestingPass::new(&vk_context, texture)?;
+        let pass = YuvyToR8Pass::new(&vk_context, cam.width, cam.height)?;
+        tracing::info!("YUVY→R8 pass created ({}×{})", cam.width, cam.height);
 
         Ok(Self {
             vk_context,
             pass,
             rcx: None,
             fps: FpsCounter::new(),
-            start_time: SystemTime::now(),
+            _start_time: SystemTime::now(),
+            cam,
         })
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let rcx = RenderContext::new(
             event_loop,
@@ -84,23 +79,30 @@ impl ApplicationHandler for App {
                 let rcx = self.rcx.as_ref().unwrap();
                 let result = swapchain::acquire_next_image(rcx.swapchain.clone(), None);
 
-                let mut present_builder = AutoCommandBufferBuilder::primary(
+                let (cam_idx, cam_img) = self.cam.capture().unwrap();
+
+                let mut cmd = AutoCommandBufferBuilder::primary(
                     self.vk_context.cmd_buffer_allocator.clone(),
                     self.vk_context.queue.queue_family_index(),
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .unwrap();
 
-                // Dispatch the compute shader.
+                // Copy raw YUYV bytes from the camera's linear DMABUF
+                // image into the pass's storage buffer.
+                let mut copy_info =
+                    CopyImageToBufferInfo::image_buffer(cam_img, self.pass.input_buffer.clone());
+                copy_info.src_image_layout = ImageLayout::General;
+                cmd.copy_image_to_buffer(copy_info).unwrap();
+
+                // V4L2 buffer is now safe to release — the raw bytes are
+                // in the storage buffer.
+                self.cam.release(cam_idx).unwrap();
+
+                // Dispatch the YUVY→R8 luminance-extraction shader.
                 let extent = self.pass.output_image.extent();
                 let group_counts = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
-                let elapsed = SystemTime::now()
-                    .duration_since(self.start_time)
-                    .unwrap()
-                    .as_millis() as u32;
-                self.pass
-                    .dispatch(&mut present_builder, elapsed, group_counts)
-                    .unwrap();
+                self.pass.dispatch(&mut cmd, group_counts).unwrap();
 
                 let (img_idx, _, acquire_future) = match result {
                     Ok(val) => val,
@@ -110,15 +112,14 @@ impl ApplicationHandler for App {
                     }
                 };
 
-                // Blit the compute output onto the swapchain image.
-                present_builder
-                    .blit_image(BlitImageInfo::images(
-                        self.pass.output_image.clone(),
-                        rcx.swapchain_images[img_idx as usize].clone(),
-                    ))
-                    .unwrap();
+                // Blit the luminance output onto the swapchain image.
+                cmd.blit_image(BlitImageInfo::images(
+                    self.pass.output_image.clone(),
+                    rcx.swapchain_images[img_idx as usize].clone(),
+                ))
+                .unwrap();
 
-                let cmd = match present_builder.build() {
+                let cmd = match cmd.build() {
                     Ok(val) => val,
                     Err(_) => return,
                 };

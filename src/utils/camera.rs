@@ -18,11 +18,11 @@ use std::sync::Arc;
 use v4l::buffer::Type;
 use v4l::control::{Control, Value};
 use v4l::io::traits::{CaptureStream, Stream};
+use v4l::v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer};
 use v4l::v4l2::ioctl;
 use v4l::v4l2::vidioc::VIDIOC_EXPBUF;
-use v4l::v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer};
 use v4l::video::Capture;
-use v4l::{prelude::*, FourCC};
+use v4l::{FourCC, prelude::*};
 use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::image::sys::RawImage;
@@ -133,7 +133,7 @@ impl CameraCapture<'_> {
                         image_type: ImageType::Dim2d,
                         format: Format::G8B8G8R8_422_UNORM,
                         extent: [width, height, 1],
-                        usage: ImageUsage::TRANSFER_DST | ImageUsage::SAMPLED,
+                        usage: ImageUsage::TRANSFER_SRC,
                         tiling: ImageTiling::Linear,
                         external_memory_handle_types: ExternalMemoryHandleTypes::DMA_BUF,
                         ..Default::default()

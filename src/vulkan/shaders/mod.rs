@@ -8,3 +8,5 @@ pub mod gaussian_blur;
 pub mod orb;
 /// Testing shader
 pub mod testing;
+/// YUVY-to-R8 luminance extraction compute pass.
+pub mod yuvy_to_r8;

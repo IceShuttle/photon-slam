@@ -62,6 +62,9 @@ pub fn create_logical_device(
             }],
             enabled_extensions: DeviceExtensions {
                 khr_swapchain: true,
+                ext_external_memory_dma_buf: true,
+                khr_external_memory_fd: true,
+                ext_image_drm_format_modifier: false,
                 ..Default::default()
             },
             enabled_features: DeviceFeatures {

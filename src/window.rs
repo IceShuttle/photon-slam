@@ -1,7 +1,7 @@
 use crate::{
     fps::FpsCounter,
     trace_return,
-    utils::camera::{CameraCapture, CameraConfig},
+    utils::camera::linux::{CameraCapture, CameraConfig},
     vulkan::{
         context::VulkanContext,
         disp::RenderContext,
@@ -66,13 +66,13 @@ impl App<'_> {
         // (the camera image extent at width/2 is used to derive the
         // full-resolution output extent).
         let mut cam = CameraCapture::new(&vk_context, &CameraConfig::default())?;
-        let (init_idx, cam_img) = cam.capture()?;
+        let (cam_idx, cam_img) = cam.capture()?;
 
         // YUVY→R8: reads YUYV from the camera image, writes full-res
         // luminance.  The camera image is only used for extent here;
         // per-frame images come from capture/release in window_event.
         let yuvy_pass = YuvyToR8Pass::new(&vk_context, cam_img)?;
-        cam.release(init_idx)?;
+        cam.release(cam_idx)?;
         tracing::info!("YUVY→R8 pass created");
 
         // FAST-9: luminance → corner score mask.

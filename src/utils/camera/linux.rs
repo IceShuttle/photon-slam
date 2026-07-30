@@ -13,39 +13,46 @@
 
 use crate::vulkan::context::VulkanContext;
 use anyhow::{Context, Result};
-use std::os::fd::FromRawFd;
-use std::sync::Arc;
-use v4l::buffer::Type;
-use v4l::control::{Control, Value};
-use v4l::io::traits::{CaptureStream, Stream};
-use v4l::v4l2::ioctl;
-use v4l::v4l2::vidioc::VIDIOC_EXPBUF;
-use v4l::v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer};
-use v4l::video::Capture;
-use v4l::{prelude::*, FourCC};
-use vulkano::device::Device;
-use vulkano::format::Format;
-use vulkano::image::sys::RawImage;
-use vulkano::image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage};
-use vulkano::memory::{
-    DeviceMemory, ExternalMemoryHandleType, ExternalMemoryHandleTypes, MemoryAllocateInfo,
-    MemoryImportInfo, MemoryRequirements, ResourceMemory,
+use std::{os::fd::FromRawFd, sync::Arc};
+use v4l::{
+    buffer::Type,
+    control::{Control, Value},
+    io::traits::{CaptureStream, Stream},
+    prelude::*,
+    v4l2::{ioctl, vidioc::VIDIOC_EXPBUF},
+    v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer},
+    video::Capture,
+    FourCC,
+};
+use vulkano::{
+    device::Device,
+    format::Format,
+    image::{sys::RawImage, Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage},
+    memory::{
+        DeviceMemory, ExternalMemoryHandleType, ExternalMemoryHandleTypes, MemoryAllocateInfo,
+        MemoryImportInfo, MemoryRequirements, ResourceMemory,
+    },
 };
 
 /// Number of V4L2 mmap buffers to request from the driver.
 const BUFFER_COUNT: usize = 4;
 
 /// Camera capture config
+#[derive(Debug, Clone, Copy)]
 pub struct CameraConfig {
     pub width: u32,
     pub height: u32,
+    pub pixel_format: v4l::FourCC,
+    pub hz: u32,
 }
 
 impl Default for CameraConfig {
     fn default() -> Self {
         Self {
+            pixel_format: FourCC::new(b"YUYV"),
             width: 640,
             height: 480,
+            hz: 30,
         }
     }
 }
@@ -55,9 +62,7 @@ pub struct CameraCapture<'a> {
     /// The V4L2 pixel format negotiated by the driver.
     stream: MmapStream<'a>,
     gpu_images: [Arc<Image>; BUFFER_COUNT],
-    pub pixel_format: v4l::FourCC,
-    pub width: u32,
-    pub height: u32,
+    config: CameraConfig,
 }
 
 impl CameraCapture<'_> {
@@ -72,7 +77,7 @@ impl CameraCapture<'_> {
         let mut params = video_device.params()?;
         params.interval = v4l::Fraction {
             numerator: 1,
-            denominator: 30,
+            denominator: config.hz,
         };
 
         // Setting auto exposure to manual(1)
@@ -114,7 +119,7 @@ impl CameraCapture<'_> {
 
         let gpu_images: Vec<Arc<Image>> = (0..BUFFER_COUNT)
             .map(|i| -> Result<Arc<Image>> {
-                stream.queue(i as usize)?;
+                stream.queue(i)?;
                 let mut exp_buf: v4l2_exportbuffer = unsafe { std::mem::zeroed() };
                 exp_buf.type_ = v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE;
                 exp_buf.index = i as u32;
@@ -179,16 +184,21 @@ impl CameraCapture<'_> {
 
         let gpu_images: [Arc<Image>; BUFFER_COUNT] = gpu_images.try_into().unwrap();
 
+        let config = CameraConfig {
+            pixel_format,
+            width,
+            height,
+            hz: params.interval.denominator,
+        };
+
         stream.start()?;
 
         tracing::info!("CameraCapture instantiated");
 
         Ok(Self {
-            pixel_format,
             stream,
             gpu_images,
-            width,
-            height,
+            config,
         })
     }
 
@@ -209,6 +219,11 @@ impl CameraCapture<'_> {
         self.stream
             .queue(index)
             .context("failed to requeue V4L2 buffer")
+    }
+
+    /// Returns the Camera config
+    pub fn config(&self) -> CameraConfig {
+        self.config
     }
 }
 

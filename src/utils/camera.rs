@@ -18,11 +18,11 @@ use std::sync::Arc;
 use v4l::buffer::Type;
 use v4l::control::{Control, Value};
 use v4l::io::traits::{CaptureStream, Stream};
-use v4l::v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer};
 use v4l::v4l2::ioctl;
 use v4l::v4l2::vidioc::VIDIOC_EXPBUF;
+use v4l::v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer};
 use v4l::video::Capture;
-use v4l::{FourCC, prelude::*};
+use v4l::{prelude::*, FourCC};
 use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::image::sys::RawImage;
@@ -131,9 +131,14 @@ impl CameraCapture<'_> {
                     ctx.device.clone(),
                     ImageCreateInfo {
                         image_type: ImageType::Dim2d,
-                        format: Format::G8B8G8R8_422_UNORM,
-                        extent: [width, height, 1],
-                        usage: ImageUsage::TRANSFER_SRC,
+                        // R8G8B8A8 (not G8B8G8R8_422) avoids YCbCr image-
+                        // view restrictions.  YUYV bytes are the same layout:
+                        // Y0→R, U→G, Y1→B, V→A.  Extent width is halved
+                        // because each 4-byte R8G8B8A8 texel stores 2 pixels'
+                        // worth of YUYV data.
+                        format: Format::R8G8B8A8_UNORM,
+                        extent: [width / 2, height, 1],
+                        usage: ImageUsage::TRANSFER_SRC | ImageUsage::STORAGE,
                         tiling: ImageTiling::Linear,
                         external_memory_handle_types: ExternalMemoryHandleTypes::DMA_BUF,
                         ..Default::default()

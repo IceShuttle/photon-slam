@@ -2,25 +2,25 @@
 //
 // Computes the first-order image moments (m10, m01) in a patch around each
 // FAST corner pixel and encodes the resulting orientation angle as an RGB
-// colour.
+// hue.
 //
 // Only pixels flagged as corners by the FAST-9 pass compute moments; all
 // others write black and return immediately.
+//
+// Input is a single-channel R8 image (luminance) — moment computation
+// reads the R channel of each texel.
 
 import math;
 
-Texture2D<float4> inputTexture;     // original image
-RWTexture2D<float4> outputTexture;  // angle encoding
-RWTexture2D<float4> fastOutput;     // FAST corner score mask
+Texture2D<float> inputTexture;     // luminance in .r
+RWTexture2D<float4> outputTexture; // angle encoding as RGB hue
+RWTexture2D<float4> fastOutput;    // FAST corner score mask
 
-// Patch radius — 7 gives a 15×15 region (225 texels).  Standard ORB uses
-// R=15 (31×31), but for a per-pixel visualisation the smaller radius
-// gives a stable orientation estimate at 4.3× lower compute cost.
+// Patch radius — 7 gives a 15×15 region (225 texels).
 #define R 7
 
-[shader("compute")]
-[numthreads(16, 16, 1)]
-void main(uint3 dispatchThreadID: SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void
+main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     uint2 dim;
     outputTexture.GetDimensions(dim.x, dim.y);
     if (dispatchThreadID.x >= dim.x || dispatchThreadID.y >= dim.y)
@@ -45,7 +45,7 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID) {
     float m10 = 0.0, m01 = 0.0;
     for (int dy = -R; dy <= R; dy++) {
         for (int dx = -R; dx <= R; dx++) {
-            float I = inputTexture.Load(int3(int2(pos) + int2(dx, dy), 0)).r;
+            float I = inputTexture.Load(int3(int2(pos) + int2(dx, dy), 0));
             m10 += float(dx) * I;
             m01 += float(dy) * I;
         }

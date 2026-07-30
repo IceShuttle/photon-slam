@@ -12,3 +12,11 @@ pub fn setup_tracing() {
         Err(_) => eprintln!("Tracing cannot  be initiated"),
     }
 }
+
+#[macro_export]
+macro_rules! trace_return {
+    ($e:expr) => {
+        tracing::error!("{:?}", $e);
+        return;
+    };
+}

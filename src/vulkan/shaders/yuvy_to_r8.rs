@@ -1,79 +1,61 @@
-use super::errors::ShaderDispatchError;
 use crate::vulkan::context::VulkanContext;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use vulkano::{
-    buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{
-        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
+        allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
     format::Format,
-    image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
+    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
     pipeline::{
-        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
         compute::ComputePipelineCreateInfo,
         layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
+        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
     },
-    shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words},
+    shader::{spirv::bytes_to_words, ShaderModule, ShaderModuleCreateInfo},
 };
 
-/// Compute pass that extracts luminance from a YUVY-packed buffer into
-/// R8G8B8A8_UNORM.
+/// Compute pass that extracts luminance from a YUVY camera image.
 ///
-/// The input is a storage buffer of `u32` where each element represents a
-/// YUYV 4-byte group: `{ Y_even, U, Y_odd, V }` (byte order).  The output
-/// is a full-resolution image with the Y (luminance) value in the R channel
-/// (G = B = 0, A = 1).
+/// The camera image is an `R8G8B8A8_UNORM` image where each texel stores
+/// a YUYV group: `.r=Y0`, `.g=U`, `.b=Y1`, `.a=V`.  The camera image
+/// width is half the pixel resolution.  The output is a grayscale R8_UNORM with R=luminance.
 ///
-/// No push constants — this is a simple 1:1 mapping.
+/// A fresh descriptor set is created every `dispatch()` call so the
+/// camera image binding stays current across frames.
 pub struct YuvyToR8Pass {
     pub pipeline: Arc<ComputePipeline>,
-    pub descriptor_set: Arc<DescriptorSet>,
-    pub input_buffer: Subbuffer<[u32]>,
+    ds_allocator: Arc<StandardDescriptorSetAllocator>,
     /// Output image (R8G8B8A8_UNORM) with luminance in the R channel.
     pub output_image: Arc<Image>,
 }
 
 impl YuvyToR8Pass {
-    /// Build the pipeline and descriptor set.
+    /// Build the pipeline and output image.
     ///
-    /// `pixel_width` and `pixel_height` are the *full* pixel resolution of
-    /// the YUYV camera frame — used to size the output image and the
-    /// internal storage buffer (which is `pixel_width * pixel_height * 2 / 4`
-    /// u32 elements).
-    pub fn new(ctx: &VulkanContext, pixel_width: u32, pixel_height: u32) -> Result<Self> {
-        let output_extent = [pixel_width, pixel_height, 1];
+    /// `camera_image` is the `R8G8B8A8_UNORM` camera image at width/2
+    /// (each texel covers 2 pixels in YUYV packing).  The output is
+    /// created at the full pixel resolution (2× the input width).
+    pub fn new(ctx: &VulkanContext, camera_image: Arc<Image>) -> Result<Self> {
+        let extent = camera_image.extent();
+        // Full pixel width = YUYV input width × 2.
+        let output_extent = [extent[0] * 2, extent[1], extent[2]];
 
         let output_image = Image::new(
             ctx.memory_allocator.clone(),
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
-                format: Format::R8G8B8A8_UNORM,
+                format: Format::R8_UNORM,
                 extent: output_extent,
-                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC | ImageUsage::SAMPLED,
                 ..Default::default()
             },
             AllocationCreateInfo {
                 memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
                 ..Default::default()
             },
-        )?;
-
-        // Storage buffer for raw YUYV data: one u32 per 2 pixels.
-        let num_u32 = (pixel_width * pixel_height / 2) as u64;
-        let input_buffer: Subbuffer<[u32]> = Buffer::new_slice(
-            ctx.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_DST | BufferUsage::STORAGE_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                ..Default::default()
-            },
-            num_u32,
         )?;
 
         // --- compile SPIR-V ---
@@ -99,43 +81,53 @@ impl YuvyToR8Pass {
         )
         .context("failed to create YUVY-to-R8 compute pipeline")?;
 
-        // --- descriptor set ---
-        // Binding 0: read-only storage buffer (StructuredBuffer<uint>)
-        // Binding 1: storage image (RWTexture2D<float4>)
         let ds_allocator = Arc::new(StandardDescriptorSetAllocator::new(
             ctx.device.clone(),
             Default::default(),
         ));
-        let descriptor_set = DescriptorSet::new(
-            ds_allocator,
-            pipeline.layout().set_layouts()[0].clone(),
-            [
-                WriteDescriptorSet::buffer(0, input_buffer.clone()),
-                WriteDescriptorSet::image_view(1, ImageView::new_default(output_image.clone())?),
-            ],
-            [],
-        )?;
 
         Ok(Self {
             pipeline,
-            descriptor_set,
-            input_buffer,
+            ds_allocator,
             output_image,
         })
     }
 
-    /// Record pipeline bind and compute dispatch.
+    /// Bind the current camera image, bind pipeline, and dispatch.
+    ///
+    /// `camera_image` must be the same-size `R8G8B8A8_UNORM` camera frame
+    /// passed to `new()` — the image data changes per-capture but the
+    /// Vulkan `Image` object family is the same.
     pub fn dispatch(
         &self,
         cmd: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        camera_image: Arc<Image>,
         group_counts: [u32; 3],
-    ) -> Result<(), ShaderDispatchError> {
+    ) -> Result<()> {
+        let input_view = ImageView::new_default(camera_image)
+            .context("failed to create image view for camera frame")?;
+        let output_view = ImageView::new_default(self.output_image.clone())
+            .context("failed to create image view for output image")?;
+
+        // Fresh descriptor set per frame so the camera-image binding
+        // always points to the latest captured frame.
+        let descriptor_set = DescriptorSet::new(
+            self.ds_allocator.clone(),
+            self.pipeline.layout().set_layouts()[0].clone(),
+            [
+                WriteDescriptorSet::image_view(0, input_view),
+                WriteDescriptorSet::image_view(1, output_view),
+            ],
+            [],
+        )
+        .context("failed to create descriptor set for YUVY pass")?;
+
         cmd.bind_pipeline_compute(self.pipeline.clone())?;
         cmd.bind_descriptor_sets(
             PipelineBindPoint::Compute,
             self.pipeline.layout().clone(),
             0,
-            self.descriptor_set.clone(),
+            descriptor_set,
         )?;
         unsafe { cmd.dispatch(group_counts) }?;
         Ok(())

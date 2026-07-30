@@ -5,17 +5,17 @@ use std::sync::Arc;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{
-        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
+        allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
     format::Format,
-    image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
+    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
     memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
     pipeline::{
-        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
         compute::ComputePipelineCreateInfo,
         layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
+        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
     },
-    shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words},
+    shader::{spirv::bytes_to_words, ShaderModule, ShaderModuleCreateInfo},
 };
 
 /// Push constants for the FAST-9 shader.
@@ -47,7 +47,7 @@ impl FastPass {
             ctx.memory_allocator.clone(),
             ImageCreateInfo {
                 image_type: ImageType::Dim2d,
-                format: Format::R8G8B8A8_UNORM,
+                format: Format::R8_UNORM,
                 extent,
                 usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
                 ..Default::default()

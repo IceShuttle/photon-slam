@@ -7,8 +7,8 @@
 
 import math;
 
-Texture2D<float4> inputTexture;
-RWTexture2D<float4> outputTexture;
+Texture2D<float> inputTexture;
+RWTexture2D<float> outputTexture;
 
 struct ShaderInputs {
     float threshold;
@@ -28,7 +28,7 @@ static const int kDy[16] = {
 #define N 9
 
 int fast_score(uint2 pos, float threshold) {
-    float centre = inputTexture.Load(int3(pos, 0)).r;
+    float centre = inputTexture.Load(int3(pos, 0));
     float lo = centre - threshold;
     float hi = centre + threshold;
 
@@ -36,32 +36,35 @@ int fast_score(uint2 pos, float threshold) {
     int states[16];
     [unroll] for (int i = 0; i < 16; i++) {
         int2 p = int2(pos) + int2(kDx[i], kDy[i]);
-        float v = inputTexture.Load(int3(p, 0)).r;
+        float v = inputTexture.Load(int3(p, 0));
         states[i] = (v > hi) ? 1 : ((v < lo) ? -1 : 0);
     }
 
     // Look for N contiguous brighter.
     [unroll] for (int i = 0; i < 16; i++) {
         int cnt = 0;
-        [unroll] for (int j = 0; j < N; j++)
-            if (states[(i + j) & 15] == 1) cnt++; else break;
-        if (cnt >= N) return cnt;
+        [unroll] for (int j = 0; j < N; j++) if (states[(i + j) & 15] == 1)
+            cnt++;
+        else break;
+        if (cnt >= N)
+            return cnt;
     }
 
     // Look for N contiguous darker.
     [unroll] for (int i = 0; i < 16; i++) {
         int cnt = 0;
-        [unroll] for (int j = 0; j < N; j++)
-            if (states[(i + j) & 15] == -1) cnt++; else break;
-        if (cnt >= N) return -cnt;
+        [unroll] for (int j = 0; j < N; j++) if (states[(i + j) & 15] == -1)
+            cnt++;
+        else break;
+        if (cnt >= N)
+            return -cnt;
     }
 
     return 0;
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)]
-void main(uint3 dispatchThreadID: SV_DispatchThreadID) {
+[shader("compute")][numthreads(16, 16, 1)] void
+main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     uint2 dim;
     outputTexture.GetDimensions(dim.x, dim.y);
     if (dispatchThreadID.x >= dim.x || dispatchThreadID.y >= dim.y)
@@ -71,11 +74,11 @@ void main(uint3 dispatchThreadID: SV_DispatchThreadID) {
 
     // Border of radius 3 — no valid circle.
     if (pos.x < 3 || pos.y < 3 || pos.x >= dim.x - 3 || pos.y >= dim.y - 3) {
-        outputTexture.Store(pos, float4(0, 0, 0, 1));
+        outputTexture.Store(pos, 0);
         return;
     }
 
     int score = fast_score(pos, s_inp.threshold);
     float intensity = float(abs(score)) / float(N);
-    outputTexture.Store(pos, float4(intensity, intensity, intensity, 1));
+    outputTexture.Store(pos, intensity);
 }

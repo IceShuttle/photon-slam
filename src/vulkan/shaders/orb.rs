@@ -20,8 +20,10 @@ use vulkano::{
 
 /// Compute pass that computes intensity-centroid orientation per pixel.
 ///
-/// Used as the orientation step in ORB feature extraction.  Output is an
-/// RGB encoding of the angle at each pixel.
+/// Reads luminance from `input_image` (.r channel) and the corner mask
+/// from `fast_output` (FAST response image, .r > 0 = corner).  Writes an
+/// RGB hue encoding of the orientation angle at each corner pixel; non-
+/// corner pixels are black.
 pub struct OrbPass {
     pub pipeline: Arc<ComputePipeline>,
     pub descriptor_set: Arc<DescriptorSet>,
@@ -31,8 +33,8 @@ pub struct OrbPass {
 impl OrbPass {
     /// Build the ORB orientation pipeline and descriptor set.
     ///
-    /// `fast_output` is the output image from the FAST-9 pass, used as a
-    /// mask so orientation is only computed at detected corner pixels.
+    /// * `input_image` — luminance image (R channel), e.g. YUVY→R8 output.
+    /// * `fast_output` — FAST-9 corner response image (.r > 0 → corner).
     pub fn new(
         ctx: &VulkanContext,
         input_image: Arc<Image>,
@@ -79,6 +81,9 @@ impl OrbPass {
         .context("failed to create ORB orientation compute pipeline")?;
 
         // --- descriptor set ---
+        // Binding 0: input luminance (Texture2D<float4>)
+        // Binding 1: output orientation (RWTexture2D<float4>)
+        // Binding 2: FAST corner mask (RWTexture2D<float4>)
         let ds_allocator = Arc::new(StandardDescriptorSetAllocator::new(
             ctx.device.clone(),
             Default::default(),

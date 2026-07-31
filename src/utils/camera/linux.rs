@@ -1,32 +1,27 @@
-//! V4L2 camera capture → Vulkan image via CPU staging copy.
+//! V4L2 camera capture → Vulkan image via DMA-BUF.
 //!
 //! Pipeline:
 //! 1. V4L2 mmap buffer capture (kernel writes DMA into mapped pages)
-//! 2. CPU pixel conversion to RGBA (MJPEG decode, YUV→RGB, etc.)
-//! 3. CPU copy from conversion buffer → host-visible staging buffer
-//! 4. `vkCmdCopyBufferToImage` → GPU-optimal image
-//!
-//! This avoids the fragile and crash-prone DMA-BUF/VK_EXTERNAL_MEMORY path
-//! (which caused segfaults on Intel Mesa with `DrmFormatModifier`).
-//! The extra CPU work (decode + copy) is invisible compared to the camera
-//! frame interval (~33 ms at 30 fps).
+//! 2. These are then used to create Vulkan Images using vulkano's RawImage
+//! 3. On capture it deques a buffer for gpu to process
+//! 4. On release it queues the buffer back for camer to write
 
 use anyhow::{Context, Result};
 use std::{os::fd::FromRawFd, sync::Arc};
 use v4l::{
+    FourCC,
     buffer::Type,
     control::{Control, Value},
     io::traits::{CaptureStream, Stream},
     prelude::*,
-    v4l2::{ioctl, vidioc::VIDIOC_EXPBUF},
     v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer},
+    v4l2::{ioctl, vidioc::VIDIOC_EXPBUF},
     video::Capture,
-    FourCC,
 };
 use vulkano::{
     device::Device,
     format::Format,
-    image::{sys::RawImage, Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage},
+    image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage, sys::RawImage},
     memory::{
         DeviceMemory, ExternalMemoryHandleType, ExternalMemoryHandleTypes, MemoryAllocateInfo,
         MemoryImportInfo, MemoryRequirements, ResourceMemory,

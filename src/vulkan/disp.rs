@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use vulkano::{
-    device::{Device, physical::PhysicalDevice},
+    device::{physical::PhysicalDevice, Device},
     format::Format,
     image::{Image, ImageUsage},
     instance::Instance,
@@ -84,8 +84,8 @@ impl RenderContext {
             tracing::info!("Mailbox selected");
             PresentMode::Mailbox
         } else if present_modes.contains(&PresentMode::Fifo) {
-            tracing::info!("Mailbox selected");
-            PresentMode::Mailbox
+            tracing::info!("Fifo selected");
+            PresentMode::Fifo
         } else {
             PresentMode::Immediate
         };

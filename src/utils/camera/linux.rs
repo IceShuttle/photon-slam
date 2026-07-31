@@ -11,7 +11,6 @@
 //! The extra CPU work (decode + copy) is invisible compared to the camera
 //! frame interval (~33 ms at 30 fps).
 
-use crate::vulkan::context::VulkanContext;
 use anyhow::{Context, Result};
 use std::{os::fd::FromRawFd, sync::Arc};
 use v4l::{
@@ -68,7 +67,7 @@ pub struct CameraCapture<'a> {
 impl CameraCapture<'_> {
     /// Open `/dev/video0`, negotiate format at the requested resolution,
     /// mmap buffers, and pre-allocate the GPU image and queues them
-    pub fn new(ctx: &VulkanContext, config: &CameraConfig) -> Result<Self> {
+    pub fn new(vk_device: Arc<Device>, config: &CameraConfig) -> Result<Self> {
         let video_device = v4l::Device::new(0).context("failed to open /dev/video0")?;
         let device_fd = video_device.handle().fd();
         tracing::info!("Video device created");
@@ -133,7 +132,7 @@ impl CameraCapture<'_> {
                 tracing::info!("Buffer {i} exported");
 
                 let raw_image = RawImage::new(
-                    ctx.device.clone(),
+                    vk_device.clone(),
                     ImageCreateInfo {
                         image_type: ImageType::Dim2d,
                         // R8G8B8A8 (not G8B8G8R8_422) avoids YCbCr image-
@@ -153,11 +152,11 @@ impl CameraCapture<'_> {
 
                 let device_memory = unsafe {
                     DeviceMemory::import(
-                        ctx.device.clone(),
+                        vk_device.clone(),
                         MemoryAllocateInfo {
                             allocation_size: memory_requirements.layout.size(),
                             memory_type_index: find_memory_type_index(
-                                &ctx.device,
+                                &vk_device,
                                 memory_requirements,
                             )?,
                             dedicated_allocation: Some(

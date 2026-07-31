@@ -65,7 +65,7 @@ impl App<'_> {
         // Camera first — need one frame to size the YUVY output image
         // (the camera image extent at width/2 is used to derive the
         // full-resolution output extent).
-        let mut cam = CameraCapture::new(&vk_context, &CameraConfig::default())?;
+        let mut cam = CameraCapture::new(vk_context.device.clone(), &CameraConfig::default())?;
         let (cam_idx, cam_img) = cam.capture()?;
 
         // YUVY→R8: reads YUYV from the camera image, writes full-res

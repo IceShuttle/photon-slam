@@ -92,7 +92,7 @@ impl App<'_> {
             yuvy_pass,
             fast_pass,
             orb_pass,
-            rcx: None,
+            rcx: None, // To be initialized on resume
             fps: FpsCounter::new(),
             _start_time: SystemTime::now(),
             cam,

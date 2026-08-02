@@ -1,7 +1,7 @@
 use crate::{
     fps::FpsCounter,
     trace_return,
-    utils::camera::linux::{CameraCapture, CameraConfig},
+    utils::camera::{linux::CameraCapture, CameraConfig},
     vulkan::{
         context::VulkanContext,
         disp::RenderContext,

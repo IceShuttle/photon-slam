@@ -6,22 +6,23 @@
 //! 3. On capture it deques a buffer for gpu to process
 //! 4. On release it queues the buffer back for camer to write
 
+use super::CameraConfig;
 use anyhow::{Context, Result};
 use std::{os::fd::FromRawFd, sync::Arc};
 use v4l::{
-    FourCC,
     buffer::Type,
     control::{Control, Value},
     io::traits::{CaptureStream, Stream},
     prelude::*,
-    v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer},
     v4l2::{ioctl, vidioc::VIDIOC_EXPBUF},
+    v4l_sys::{v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE, v4l2_exportbuffer},
     video::Capture,
+    FourCC,
 };
 use vulkano::{
     device::Device,
     format::Format,
-    image::{Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage, sys::RawImage},
+    image::{sys::RawImage, Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage},
     memory::{
         DeviceMemory, ExternalMemoryHandleType, ExternalMemoryHandleTypes, MemoryAllocateInfo,
         MemoryImportInfo, MemoryRequirements, ResourceMemory,
@@ -30,26 +31,6 @@ use vulkano::{
 
 /// Number of V4L2 mmap buffers to request from the driver.
 const BUFFER_COUNT: usize = 4;
-
-/// Camera capture config
-#[derive(Debug, Clone, Copy)]
-pub struct CameraConfig {
-    pub width: u32,
-    pub height: u32,
-    pub pixel_format: v4l::FourCC,
-    pub hz: u32,
-}
-
-impl Default for CameraConfig {
-    fn default() -> Self {
-        Self {
-            pixel_format: FourCC::new(b"YUYV"),
-            width: 640,
-            height: 480,
-            hz: 30,
-        }
-    }
-}
 
 /// Implements
 pub struct CameraCapture<'a> {

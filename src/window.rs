@@ -1,7 +1,7 @@
 use crate::{
     fps::FpsCounter,
     trace_return,
-    utils::camera::{linux::CameraCapture, CameraConfig},
+    utils::camera::CameraConfig,
     vulkan::{
         context::VulkanContext,
         disp::RenderContext,
@@ -31,6 +31,12 @@ use winit::{
     window::WindowId,
 };
 
+#[cfg(target_os = "linux")]
+use crate::utils::camera::linux::V4lCapture;
+
+#[cfg(target_os = "android")]
+use crate::utils::camera::android::AndroidCam;
+
 macro_rules! compute_groups2D {
     ($extent:expr,$grp_size:expr) => {
         [
@@ -40,6 +46,12 @@ macro_rules! compute_groups2D {
         ]
     };
 }
+
+#[cfg(target_os = "linux")]
+type CameraCapture<'a> = V4lCapture<'a>;
+
+#[cfg(target_os = "android")]
+type CameraCapture<'a> = AndroidCam<'a>;
 
 /// Top-level application state.
 ///

@@ -33,14 +33,14 @@ use vulkano::{
 const BUFFER_COUNT: usize = 4;
 
 /// Implements
-pub struct CameraCapture<'a> {
+pub struct V4lCapture<'a> {
     /// The V4L2 pixel format negotiated by the driver.
     stream: MmapStream<'a>,
     gpu_images: [Arc<Image>; BUFFER_COUNT],
     config: CameraConfig,
 }
 
-impl CameraCapture<'_> {
+impl V4lCapture<'_> {
     /// Open `/dev/video0`, negotiate format at the requested resolution,
     /// mmap buffers, and pre-allocate the GPU image and queues them
     pub fn new(vk_device: Arc<Device>, config: &CameraConfig) -> Result<Self> {
@@ -72,7 +72,10 @@ impl CameraCapture<'_> {
         let mut fmt = video_device.format()?;
         fmt.width = config.width;
         fmt.height = config.height;
-        fmt.fourcc = FourCC::new(b"YUYV");
+        fmt.fourcc = match config.pixel_format {
+            Format::B8G8R8G8_422_UNORM => FourCC::new(b"YUYV"),
+            _ => FourCC::new(b"YUYV"),
+        };
         let negotiated = video_device.set_format(&fmt)?;
 
         tracing::info!(
@@ -84,7 +87,9 @@ impl CameraCapture<'_> {
             negotiated.size,
         );
 
-        let pixel_format = negotiated.fourcc;
+        let pixel_format = match negotiated.fourcc {
+            _ => Format::B8G8R8G8_422_UNORM,
+        };
         let width = negotiated.width;
         let height = negotiated.height;
 
@@ -202,7 +207,7 @@ impl CameraCapture<'_> {
     }
 }
 
-impl Drop for CameraCapture<'_> {
+impl Drop for V4lCapture<'_> {
     fn drop(&mut self) {
         self.stream.stop().unwrap();
     }

@@ -1578,6 +1578,7 @@ dependencies = [
  "android-activity",
  "android_logger",
  "anyhow",
+ "ash",
  "bytemuck",
  "image",
  "log",

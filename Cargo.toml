@@ -10,8 +10,9 @@ image = "0.25"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 bytemuck = "1.25.0"
-anyhow = "1.0.103"
 thiserror = "2.0.18"
+anyhow = "1.0.103"
+ash = "0.38"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 v4l = "0.14.0"

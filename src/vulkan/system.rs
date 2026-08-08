@@ -35,6 +35,7 @@ pub fn get_instance_create_info(event_loop: &EventLoop<()>) -> Result<InstanceCr
         }),
         enabled_extensions: InstanceExtensions {
             khr_get_physical_device_properties2: true,
+            khr_external_memory_capabilities: true,
             ..required_extensions
         },
         ..Default::default()
@@ -65,6 +66,14 @@ pub fn create_logical_device(
                 ext_external_memory_dma_buf: true,
                 khr_external_memory_fd: true,
                 ext_image_drm_format_modifier: false,
+                // Needed to import the Camera2 AHardwareBuffer directly as
+                // GPU-visible memory (zero-copy) on Android.
+                khr_external_memory: IS_ANDROID,
+                khr_dedicated_allocation: IS_ANDROID,
+                khr_get_memory_requirements2: IS_ANDROID,
+                khr_sampler_ycbcr_conversion: IS_ANDROID,
+                ext_queue_family_foreign: IS_ANDROID,
+                android_external_memory_android_hardware_buffer: IS_ANDROID,
                 ..Default::default()
             },
             enabled_features: DeviceFeatures {

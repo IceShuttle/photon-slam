@@ -13,6 +13,7 @@ use crate::vulkan::system::get_instance_create_info;
 /// Shared Vulkan infrastructure: instance, device, queue, allocators.
 ///
 /// Created once during startup and borrowed by all subsystems.
+#[derive(Clone)]
 pub struct VulkanContext {
     pub instance: Arc<Instance>,
     pub physical_device: Arc<PhysicalDevice>,

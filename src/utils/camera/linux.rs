@@ -7,6 +7,10 @@
 //! 4. On release it queues the buffer back for camer to write
 
 use super::CameraConfig;
+use crate::{
+    compute_groups2D,
+    vulkan::{context::VulkanContext, shaders::yuvy_to_r8::YuvyToR8Pass},
+};
 use anyhow::{Context, Result};
 use std::{os::fd::FromRawFd, sync::Arc};
 use v4l::{
@@ -20,6 +24,7 @@ use v4l::{
     FourCC,
 };
 use vulkano::{
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
     device::Device,
     format::Format,
     image::{sys::RawImage, Image, ImageCreateInfo, ImageTiling, ImageType, ImageUsage},
@@ -27,6 +32,7 @@ use vulkano::{
         DeviceMemory, ExternalMemoryHandleType, ExternalMemoryHandleTypes, MemoryAllocateInfo,
         MemoryImportInfo, MemoryRequirements, ResourceMemory,
     },
+    sync::GpuFuture,
 };
 
 /// Number of V4L2 mmap buffers to request from the driver.
@@ -38,12 +44,17 @@ pub struct V4lCapture<'a> {
     stream: MmapStream<'a>,
     gpu_images: [Arc<Image>; BUFFER_COUNT],
     config: CameraConfig,
+    vk_context: VulkanContext,
+    /// Converts a captured YUYV frame to a persistent R8_UNORM luminance
+    /// image; reused (and overwritten) by every `captureY()` call.
+    yuvy_pass: YuvyToR8Pass,
 }
 
 impl V4lCapture<'_> {
     /// Open `/dev/video0`, negotiate format at the requested resolution,
     /// mmap buffers, and pre-allocate the GPU image and queues them
-    pub fn new(vk_device: Arc<Device>, config: &CameraConfig) -> Result<Self> {
+    pub fn new(vk_context: &VulkanContext, config: &CameraConfig) -> Result<Self> {
+        let vk_device = vk_context.device.clone();
         let video_device = v4l::Device::new(0).context("failed to open /dev/video0")?;
         let device_fd = video_device.handle().fd();
         tracing::info!("Video device created");
@@ -115,12 +126,12 @@ impl V4lCapture<'_> {
                 let raw_image = RawImage::new(
                     vk_device.clone(),
                     ImageCreateInfo {
-                        image_type: ImageType::Dim2d,
                         // R8G8B8A8 (not G8B8G8R8_422) avoids YCbCr image-
                         // view restrictions.  YUYV bytes are the same layout:
                         // Y0→R, U→G, Y1→B, V→A.  Extent width is halved
                         // because each 4-byte R8G8B8A8 texel stores 2 pixels'
                         // worth of YUYV data.
+                        image_type: ImageType::Dim2d,
                         format: Format::R8G8B8A8_UNORM,
                         extent: [width / 2, height, 1],
                         usage: ImageUsage::TRANSFER_SRC | ImageUsage::STORAGE,
@@ -173,12 +184,23 @@ impl V4lCapture<'_> {
 
         stream.start()?;
 
+        // YUYV→R8 conversion pass. Any buffer's extent works here — all
+        // `gpu_images` share the same format/extent.
+        let yuvy_pass = YuvyToR8Pass::new(
+            &vk_device,
+            &vk_context.memory_allocator,
+            gpu_images[0].clone(),
+            None,
+        )?;
+
         tracing::info!("CameraCapture instantiated");
 
         Ok(Self {
             stream,
             gpu_images,
             config,
+            vk_context: vk_context.clone(),
+            yuvy_pass,
         })
     }
 
@@ -199,6 +221,33 @@ impl V4lCapture<'_> {
         self.stream
             .queue(index)
             .context("failed to requeue V4L2 buffer")
+    }
+
+    /// Captures the next frame, converts YUYV → luminance on the GPU, and
+    /// releases the buffer back to the V4L2 driver. Returns the persistent
+    /// R8_UNORM output image — the same `Arc` every call, its contents
+    /// overwritten each frame.
+    #[allow(non_snake_case)]
+    pub fn captureY(&mut self) -> Result<Arc<Image>> {
+        let (index, cam_img) = self.capture()?;
+
+        let mut cmd_builder = AutoCommandBufferBuilder::primary(
+            self.vk_context.cmd_buffer_allocator.clone(),
+            self.vk_context.queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )?;
+        let extent = self.yuvy_pass.output_image.extent();
+        let groups = compute_groups2D!(extent, 16);
+        self.yuvy_pass.dispatch(&mut cmd_builder, cam_img, groups)?;
+        let cmd = cmd_builder.build()?;
+
+        vulkano::sync::now(self.vk_context.device.clone())
+            .then_execute(self.vk_context.queue.clone(), cmd)?
+            .then_signal_fence_and_flush()?
+            .wait(None)?;
+
+        self.release(index)?;
+        Ok(self.yuvy_pass.output_image.clone())
     }
 
     /// Returns the Camera config

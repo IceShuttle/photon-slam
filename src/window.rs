@@ -1,4 +1,5 @@
 use crate::{
+    compute_groups2D,
     fps::FpsCounter,
     trace_return,
     utils::camera::CameraConfig,
@@ -8,18 +9,16 @@ use crate::{
         shaders::{
             fast::{self, FastPass},
             orb::OrbPass,
-            yuvy_to_r8::YuvyToR8Pass,
         },
     },
 };
 use anyhow::Result;
-use std::{sync::Arc, time::SystemTime};
+use std::time::SystemTime;
 
 use vulkano::{
     command_buffer::{
         AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, PrimaryAutoCommandBuffer,
     },
-    image::Image,
     swapchain::{self, SwapchainPresentInfo},
     sync::GpuFuture,
     Validated, VulkanError,
@@ -36,29 +35,17 @@ use crate::utils::camera::linux::V4lCapture;
 
 #[cfg(target_os = "android")]
 use crate::utils::camera::android::AndroidCam;
-
-macro_rules! compute_groups2D {
-    ($extent:expr,$grp_size:expr) => {
-        [
-            $extent[0].div_ceil($grp_size),
-            $extent[1].div_ceil($grp_size),
-            1,
-        ]
-    };
-}
+#[cfg(target_os = "android")]
+type CameraCapture<'a> = AndroidCam<'a>;
 
 #[cfg(target_os = "linux")]
 type CameraCapture<'a> = V4lCapture<'a>;
-
-#[cfg(target_os = "android")]
-type CameraCapture<'a> = AndroidCam<'a>;
 
 /// Top-level application state.
 ///
 /// Pipeline: camera → YUVY→R8 → FAST-9 corners → ORB orientation → display.
 pub struct App<'a> {
     vk_context: VulkanContext,
-    yuvy_pass: YuvyToR8Pass,
     fast_pass: FastPass,
     orb_pass: OrbPass,
     rcx: Option<RenderContext>,
@@ -74,34 +61,23 @@ impl App<'_> {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self> {
         let vk_context = VulkanContext::new(Some(event_loop))?;
 
-        // Camera first — need one frame to size the YUVY output image
-        // (the camera image extent at width/2 is used to derive the
-        // full-resolution output extent).
-        let mut cam = CameraCapture::new(vk_context.device.clone(), &CameraConfig::default())?;
-        let (cam_idx, cam_img) = cam.capture()?;
-
-        // YUVY→R8: reads YUYV from the camera image, writes full-res
-        // luminance.  The camera image is only used for extent here;
-        // per-frame images come from capture/release in window_event.
-        let yuvy_pass = YuvyToR8Pass::new(&vk_context, cam_img)?;
-        cam.release(cam_idx)?;
-        tracing::info!("YUVY→R8 pass created");
+        // Camera first: one warm-up `captureY()` (capture → YUVY→R8 →
+        // release, all done by the camera) materializes the persistent
+        // luminance image needed to size FAST/ORB.
+        let mut cam = CameraCapture::new(&vk_context, &CameraConfig::default())?;
+        let lum_image = cam.captureY()?;
+        tracing::info!("Camera + YUVY→R8 pass created");
 
         // FAST-9: luminance → corner score mask.
-        let fast_pass = FastPass::new(&vk_context, yuvy_pass.output_image.clone())?;
+        let fast_pass = FastPass::new(&vk_context, lum_image.clone())?;
         tracing::info!("FAST-9 pass created");
 
         // ORB: luminance + FAST mask → orientation hue.
-        let orb_pass = OrbPass::new(
-            &vk_context,
-            yuvy_pass.output_image.clone(),
-            fast_pass.output_image.clone(),
-        )?;
+        let orb_pass = OrbPass::new(&vk_context, lum_image, fast_pass.output_image.clone())?;
         tracing::info!("ORB pass created");
 
         Ok(Self {
             vk_context,
-            yuvy_pass,
             fast_pass,
             orb_pass,
             rcx: None, // To be initialized on resume
@@ -119,23 +95,6 @@ impl App<'_> {
             self.vk_context.queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
-    }
-
-    fn extract_grayscale_from_cam_img(&self, cam_img: Arc<Image>) -> Result<()> {
-        let mut extract_cmd_builder = self.auto_cmd_builder()?;
-
-        // 1. YUVY→R8: extract luminance from the camera frame.
-        let lum_extent = self.yuvy_pass.output_image.extent();
-        let lum_groups = [lum_extent[0].div_ceil(16), lum_extent[1].div_ceil(16), 1];
-        self.yuvy_pass
-            .dispatch(&mut extract_cmd_builder, cam_img, lum_groups)?;
-
-        let extract_cmd = extract_cmd_builder.build()?;
-
-        let _ = vulkano::sync::now(self.vk_context.device.clone())
-            .then_execute(self.vk_context.queue.clone(), extract_cmd)?
-            .then_signal_fence_and_flush()?;
-        Ok(())
     }
 }
 
@@ -161,19 +120,11 @@ impl ApplicationHandler for App<'_> {
                 let rcx = self.rcx.as_ref().unwrap();
                 let result = swapchain::acquire_next_image(rcx.swapchain.clone(), None);
 
-                // Capture the latest camera frame.
-                let (cam_idx, cam_img) = match self.cam.capture() {
-                    Ok(val) => val,
-                    Err(e) => {
-                        trace_return!(e);
-                    }
-                };
-
-                if let Err(e) = self.extract_grayscale_from_cam_img(cam_img) {
-                    self.cam.release(cam_idx).unwrap();
+                // Capture the latest camera frame, convert to luminance,
+                // and release the buffer — all handled by the camera.
+                if let Err(e) = self.cam.captureY() {
                     trace_return!(e);
                 }
-                self.cam.release(cam_idx).unwrap();
 
                 let mut process_cmd_builder = self.auto_cmd_builder().unwrap();
 
@@ -183,7 +134,7 @@ impl ApplicationHandler for App<'_> {
                 self.fast_pass
                     .dispatch(
                         &mut process_cmd_builder,
-                        fast::FastInputs { threshold: 0.02 },
+                        fast::FastInputs { threshold: 0.01 },
                         fast_groups,
                     )
                     .unwrap();

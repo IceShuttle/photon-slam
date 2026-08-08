@@ -1,24 +1,40 @@
-//! Camera2 NDK capture → Vulkan image via CPU repack.
+//! Camera2 NDK capture → Vulkan image, zero-copy via
+//! `VK_ANDROID_external_memory_android_hardware_buffer`.
 //!
 //! Pipeline:
-//! 1. `ACameraDevice` streams into an `AImageReader` configured for the
-//!    universally-supported `YUV_420_888` format (Camera2 has no portable
-//!    equivalent of V4L2's packed YUYV).
-//! 2. Each delivered `AImage`'s Y/U/V planes are repacked on the CPU into the
-//!    same "YUYV-as-RGBA" byte layout `linux.rs` produces (Y0→R, U→G, Y1→B,
-//!    V→A), so the existing `YuvyToR8Pass` shader needs no android-specific
-//!    branch.
-//! 3. The repacked bytes are written straight into a host-visible, linearly
-//!    tiled `vulkano::image::Image` that is mapped once at startup — no
-//!    per-frame command buffer/queue is needed (`new()` only receives a
-//!    `Device`, matching `V4lCapture::new`'s signature).
-//! 4. `release()` is a no-op: unlike the V4L2 mmap buffers, the source
-//!    `AImage` is freed right after its bytes are copied in `capture()`, so
-//!    there is no driver-owned buffer to hand back.
+//! 1. `ACameraDevice` streams into an `AImageReader` configured with
+//!    `GPU_SAMPLED_IMAGE` usage, so each delivered `AImage` is backed by a
+//!    GPU-importable `AHardwareBuffer`.
+//! 2. On this hardware the buffer's pixel layout is opaque/vendor-defined
+//!    (`vkGetAndroidHardwareBufferPropertiesANDROID` reports
+//!    `format = UNDEFINED` with a nonzero `externalFormat`, and no
+//!    `STORAGE_IMAGE` format feature) — it can only ever be read through a
+//!    combined image sampler with an immutable `VkSamplerYcbcrConversion`,
+//!    never as a storage image. Vulkano's safe image/memory APIs can't
+//!    express `VkExternalFormatANDROID`, so the `VkImage`/`VkDeviceMemory`
+//!    are built with raw Vulkan calls and wrapped via vulkano's
+//!    `from_handle` constructors.
+//! 3. `AImageReader`'s buffer pool is small and fixed (`BUFFER_COUNT`
+//!    distinct gralloc buffers cycling forever), so imports are cached by
+//!    `AHardwareBuffer` id: each buffer is imported once, then every later
+//!    capture of it is a cache hit — no per-frame Vulkan object creation.
+//! 4. The conversion uses the YCbCr-identity model, which skips the
+//!    YCbCr→RGB matrix but still fixes luma/chroma to specific channels
+//!    per the Vulkan multi-planar format spec (G=Y, B=Cb, R=Cr) — so a
+//!    sample's `.g` component is raw luminance, not `.r`.
+//!    `YuvyToR8Pass`'s android shader variant samples `.g` directly.
+//! 5. `release()` is a no-op: the source `AImage` (and the driver-owned
+//!    gralloc slot behind it) is freed at the end of `capture()` once its
+//!    `AHardwareBuffer` is imported or already cached; Vulkan itself
+//!    acquires an independent reference to the buffer during import, so
+//!    the memory stays valid after the `AImage` is gone.
 
 use super::CameraConfig;
+use crate::vulkan::{context::VulkanContext, shaders::yuvy_to_r8::YuvyToR8Pass};
 use anyhow::{bail, Context, Result};
+use ash::vk;
 use ndk::{
+    hardware_buffer::{HardwareBuffer, HardwareBufferUsage},
     media::image_reader::{AcquireResult, ImageFormat, ImageReader},
     native_window::NativeWindow,
 };
@@ -34,13 +50,20 @@ use std::{
     time::Duration,
 };
 use vulkano::{
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
     device::Device,
     format::Format,
-    image::{sys::RawImage, Image, ImageAspect, ImageCreateInfo, ImageTiling, ImageType, ImageUsage},
-    memory::{
-        DedicatedAllocation, DeviceMemory, MemoryAllocateInfo, MemoryMapInfo, MemoryPropertyFlags,
-        MemoryRequirements, ResourceMemory,
+    image::{
+        sampler::ycbcr::{
+            SamplerYcbcrConversion, SamplerYcbcrConversionCreateInfo, SamplerYcbcrModelConversion,
+            SamplerYcbcrRange,
+        },
+        sys::RawImage,
+        Image, ImageCreateInfo, ImageLayout, ImageTiling, ImageType, ImageUsage,
     },
+    memory::{DedicatedAllocation, DeviceMemory, ExternalMemoryHandleTypes, MemoryAllocateInfo},
+    sync::GpuFuture,
+    VulkanObject,
 };
 
 // Link the Camera2 NDK system library (`libcamera2ndk.so`, API 24+).
@@ -50,10 +73,21 @@ use vulkano::{
 #[link(name = "camera2ndk")]
 unsafe extern "C" {}
 
-/// Number of `AImageReader` buffers / GPU staging images to round-robin over.
+/// Number of `AImageReader` buffers Camera2 cycles through; also the
+/// eventual size of the zero-copy import cache.
 const BUFFER_COUNT: usize = 4;
 
-/// Camera2 NDK capture, producing GPU-visible packed-YUYV frames.
+/// A gralloc buffer imported once and reused for as long as `AImageReader`
+/// keeps cycling it back.
+struct CachedFrame {
+    ahb_id: u64,
+    image: Arc<Image>,
+    // The image doesn't own or track this (`ImageMemory::External`), so it
+    // must be kept alive here for as long as `image` is in use.
+    _memory: DeviceMemory,
+}
+
+/// Camera2 NDK capture, producing zero-copy GPU-imported camera frames.
 pub struct AndroidCam<'a> {
     manager: *mut ffi::ACameraManager,
     device: *mut ffi::ACameraDevice,
@@ -67,38 +101,48 @@ pub struct AndroidCam<'a> {
     _window: NativeWindow,
     image_reader: ImageReader,
     frame_rx: Receiver<()>,
-    gpu_images: [Arc<Image>; BUFFER_COUNT],
-    /// Pointers into each `gpu_images` entry's mapped, host-visible memory.
-    mapped_ptrs: [*mut u8; BUFFER_COUNT],
-    next_index: usize,
+    vk_context: VulkanContext,
+    cache: Vec<CachedFrame>,
+    /// `VkSamplerYcbcrConversion` for this camera's (stable, opaque) pixel
+    /// format, created from the first captured frame. `None` until then.
+    ycbcr_conversion: Option<Arc<SamplerYcbcrConversion>>,
+    /// YUYV(opaque)→R8 conversion pass, lazily built by `captureY()` on
+    /// the first captured frame (needs `ycbcr_conversion` + a real image
+    /// to size the output).
+    yuvy_pass: Option<YuvyToR8Pass>,
     config: CameraConfig,
     _marker: PhantomData<&'a ()>,
 }
 
 impl AndroidCam<'_> {
-    /// Opens the first available camera, starts a `YUV_420_888` preview
-    /// stream at the requested resolution, and pre-allocates the GPU images
-    /// that captured frames are repacked into.
-    pub fn new(vk_device: Arc<Device>, config: &CameraConfig) -> Result<Self> {
+    /// Opens the first available camera and starts a `YUV_420_888`
+    /// preview stream at the requested resolution, backed by
+    /// GPU-importable `AHardwareBuffer`s.
+    pub fn new(vk_context: &VulkanContext, config: &CameraConfig) -> Result<Self> {
         let width = config.width;
         let height = config.height;
         let hz = config.hz.max(1);
 
         // 1. Image reader + listener: signals `capture()` whenever the
-        //    camera has delivered a new frame.
-        let mut image_reader = ImageReader::new(
+        //    camera has delivered a new frame. GPU_SAMPLED_IMAGE makes
+        //    each AImage's buffer importable into Vulkan.
+        let mut image_reader = ImageReader::new_with_usage(
             width as i32,
             height as i32,
             ImageFormat::YUV_420_888,
+            HardwareBufferUsage::GPU_SAMPLED_IMAGE,
             BUFFER_COUNT as i32,
         )
         .context("failed to create AImageReader")?;
+
         let (frame_tx, frame_rx) = mpsc::channel::<()>();
+
         image_reader
             .set_image_listener(Box::new(move |_reader| {
                 let _ = frame_tx.send(());
             }))
             .context("failed to set AImageReader image listener")?;
+
         let window = image_reader
             .window()
             .context("failed to get ANativeWindow from AImageReader")?;
@@ -134,13 +178,19 @@ impl AndroidCam<'_> {
             ffi::ACameraManager_openCamera(manager, camera_id, &mut device_callbacks, &mut device)
         };
         unsafe { ffi::ACameraManager_deleteCameraIdList(id_list) };
-        check(open_status, "ACameraManager_openCamera").inspect_err(|_| unsafe {
-            ffi::ACameraManager_delete(manager)
-        })?;
+        check(open_status, "ACameraManager_openCamera")
+            .inspect_err(|_| unsafe { ffi::ACameraManager_delete(manager) })?;
 
         // From here on, tear down manager+device on any error via a guard.
         let result = Self::finish_setup(
-            vk_device, config, image_reader, frame_rx, window, manager, device, hz,
+            vk_context,
+            config,
+            image_reader,
+            frame_rx,
+            window,
+            manager,
+            device,
+            hz,
         );
         if result.is_err() {
             unsafe {
@@ -151,11 +201,11 @@ impl AndroidCam<'_> {
         result
     }
 
-    /// Builds the capture request/session and the GPU staging images. Split
-    /// out of `new()` so the open camera manager/device can be torn down
-    /// uniformly on any failure in this half of setup.
+    /// Builds the capture request/session. Split out of `new()` so the
+    /// open camera manager/device can be torn down uniformly on any
+    /// failure in this half of setup.
     fn finish_setup(
-        vk_device: Arc<Device>,
+        vk_context: &VulkanContext,
         config: &CameraConfig,
         image_reader: ImageReader,
         frame_rx: Receiver<()>,
@@ -201,7 +251,9 @@ impl AndroidCam<'_> {
 
         let mut session_output: *mut ffi::ACaptureSessionOutput = ptr::null_mut();
         check(
-            unsafe { ffi::ACaptureSessionOutput_create(window.ptr().as_ptr(), &mut session_output) },
+            unsafe {
+                ffi::ACaptureSessionOutput_create(window.ptr().as_ptr(), &mut session_output)
+            },
             "ACaptureSessionOutput_create",
         )?;
 
@@ -248,62 +300,8 @@ impl AndroidCam<'_> {
             "ACameraCaptureSession_setRepeatingRequest",
         )?;
 
-        // Pre-allocate the GPU-visible, host-mapped images frames are
-        // repacked into. Plain (non-imported) linear-tiling memory — no
-        // queue is available here to drive a buffer→image copy command.
-        let extent = [config.width / 2, config.height, 1];
-        let mut gpu_images: Vec<Arc<Image>> = Vec::with_capacity(BUFFER_COUNT);
-        let mut mapped_ptrs: Vec<*mut u8> = Vec::with_capacity(BUFFER_COUNT);
-        for i in 0..BUFFER_COUNT {
-            let raw_image = RawImage::new(
-                vk_device.clone(),
-                ImageCreateInfo {
-                    image_type: ImageType::Dim2d,
-                    format: Format::R8G8B8A8_UNORM,
-                    extent,
-                    usage: ImageUsage::TRANSFER_SRC | ImageUsage::STORAGE,
-                    tiling: ImageTiling::Linear,
-                    ..Default::default()
-                },
-            )?;
-            let requirements = raw_image.memory_requirements()[0];
-            let memory_type_index = find_host_visible_memory_type_index(&vk_device, requirements)?;
-
-            let mut device_memory = DeviceMemory::allocate(
-                vk_device.clone(),
-                MemoryAllocateInfo {
-                    allocation_size: requirements.layout.size(),
-                    memory_type_index,
-                    dedicated_allocation: Some(DedicatedAllocation::Image(&raw_image)),
-                    ..Default::default()
-                },
-            )?;
-            device_memory.map(MemoryMapInfo {
-                offset: 0,
-                size: requirements.layout.size(),
-                ..Default::default()
-            })?;
-            let ptr = device_memory
-                .mapping_state()
-                .context("camera staging image memory failed to map")?
-                .ptr()
-                .as_ptr()
-                .cast::<u8>();
-
-            let resource_memory = ResourceMemory::new_dedicated(device_memory);
-            let image = raw_image
-                .bind_memory([resource_memory])
-                .map_err(|(err, _, _)| err)?;
-
-            gpu_images.push(Arc::new(image));
-            mapped_ptrs.push(ptr);
-            tracing::debug!("Camera staging image {i} allocated and mapped");
-        }
-        let gpu_images: [Arc<Image>; BUFFER_COUNT] = gpu_images.try_into().unwrap();
-        let mapped_ptrs: [*mut u8; BUFFER_COUNT] = mapped_ptrs.try_into().unwrap();
-
         tracing::info!(
-            "Camera2: {}x{} YUV_420_888 @ {}hz",
+            "Camera2: {}x{} YUV_420_888 @ {}hz (zero-copy)",
             config.width,
             config.height,
             hz
@@ -320,9 +318,10 @@ impl AndroidCam<'_> {
             _window: window,
             image_reader,
             frame_rx,
-            gpu_images,
-            mapped_ptrs,
-            next_index: 0,
+            vk_context: vk_context.clone(),
+            cache: Vec::with_capacity(BUFFER_COUNT),
+            ycbcr_conversion: None,
+            yuvy_pass: None,
             config: CameraConfig {
                 pixel_format: Format::B8G8R8G8_422_UNORM,
                 width: config.width,
@@ -333,8 +332,10 @@ impl AndroidCam<'_> {
         })
     }
 
-    /// Waits for the next camera frame and repacks its Y/U/V planes into the
-    /// next GPU staging image, returning its index plus the bound image.
+    /// Waits for the next camera frame. The first time a given gralloc
+    /// buffer is seen, its `AHardwareBuffer` is imported zero-copy into a
+    /// Vulkan image; every later capture of the same (cycled) buffer
+    /// reuses the cached image.
     pub fn capture(&mut self) -> Result<(usize, Arc<Image>)> {
         self.frame_rx
             .recv_timeout(Duration::from_secs(2))
@@ -351,51 +352,82 @@ impl AndroidCam<'_> {
             _ => bail!("camera image reader had no buffer available"),
         };
 
-        let width = self.config.width as usize;
-        let height = self.config.height as usize;
-        let y = image.plane_data(0)?;
-        let u = image.plane_data(1)?;
-        let v = image.plane_data(2)?;
-        let y_stride = image.plane_row_stride(0)? as usize;
-        let u_stride = image.plane_row_stride(1)? as usize;
-        let v_stride = image.plane_row_stride(2)? as usize;
-        let u_pixel_stride = image.plane_pixel_stride(1)? as usize;
-        let v_pixel_stride = image.plane_pixel_stride(2)? as usize;
+        let ahb = image
+            .hardware_buffer()
+            .context("AImage_getHardwareBuffer failed")?;
+        let ahb_id = ahb.id().context("AHardwareBuffer_getId failed")?;
 
-        let index = self.next_index;
-        self.next_index = (self.next_index + 1) % BUFFER_COUNT;
-        let gpu_image = self.gpu_images[index].clone();
-        let layout = gpu_image.subresource_layout(ImageAspect::Color, 0, 0)?;
-        let dst = self.mapped_ptrs[index];
-
-        // YUV_420_888 → packed YUYV-as-RGBA: Y0→R, U→G, Y1→B, V→A per pixel
-        // pair, matching what `YuvyToR8Pass` expects from `linux.rs`.
-        for row in 0..height {
-            let y_row = &y[row * y_stride..];
-            let u_row = &u[(row / 2) * u_stride..];
-            let v_row = &v[(row / 2) * v_stride..];
-            // SAFETY: `dst` points at `layout.size` mapped, host-coherent
-            // bytes owned solely by `gpu_images[index]`; no other reference
-            // to it is alive while we hold `&mut self`.
-            unsafe {
-                let dst_row = dst.add(layout.offset as usize + row * layout.row_pitch as usize);
-                for pair in 0..width / 2 {
-                    let texel = dst_row.add(pair * 4);
-                    *texel = y_row[pair * 2];
-                    *texel.add(1) = u_row[pair * u_pixel_stride];
-                    *texel.add(2) = y_row[pair * 2 + 1];
-                    *texel.add(3) = v_row[pair * v_pixel_stride];
-                }
-            }
+        if let Some(index) = self.cache.iter().position(|c| c.ahb_id == ahb_id) {
+            // `image`/`ahb` drop here, returning the gralloc buffer to the
+            // camera. Vulkan already holds its own reference to the
+            // underlying memory (acquired during import), so the cached
+            // Vulkan image stays valid regardless.
+            return Ok((index, self.cache[index].image.clone()));
         }
 
-        Ok((index, gpu_image))
+        let (vk_image, memory, format_props) =
+            import_hardware_buffer(&self.vk_context.device, &ahb)?;
+        if self.ycbcr_conversion.is_none() {
+            self.ycbcr_conversion = Some(create_ycbcr_conversion(
+                &self.vk_context.device,
+                &format_props,
+            )?);
+        }
+
+        let index = self.cache.len();
+        self.cache.push(CachedFrame {
+            ahb_id,
+            image: vk_image.clone(),
+            _memory: memory,
+        });
+        tracing::debug!("Camera buffer {ahb_id} imported zero-copy (slot {index})");
+
+        Ok((index, vk_image))
     }
 
-    /// No-op: the source `AImage` is freed at the end of `capture()`, so
-    /// there is no driver-owned buffer left to hand back.
+    /// No-op: buffers are imported once and cached forever, so there is no
+    /// per-frame handle to hand back.
     pub fn release(&mut self, _index: usize) -> Result<()> {
         Ok(())
+    }
+
+    /// Captures the next frame, converts its opaque YUV layout to
+    /// luminance on the GPU, and releases the buffer back to the camera
+    /// driver (a no-op on Android — see [`release`](Self::release)).
+    /// Returns the persistent R8_UNORM output image — the same `Arc`
+    /// every call, its contents overwritten each frame.
+    #[allow(non_snake_case)]
+    pub fn captureY(&mut self) -> Result<Arc<Image>> {
+        let (index, cam_img) = self.capture()?;
+
+        if self.yuvy_pass.is_none() {
+            self.yuvy_pass = Some(YuvyToR8Pass::new(
+                &self.vk_context.device,
+                &self.vk_context.memory_allocator,
+                cam_img.clone(),
+                self.ycbcr_conversion.clone(),
+            )?);
+        }
+        let yuvy_pass = self.yuvy_pass.as_ref().unwrap();
+
+        let mut cmd_builder = AutoCommandBufferBuilder::primary(
+            self.vk_context.cmd_buffer_allocator.clone(),
+            self.vk_context.queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )?;
+        let extent = yuvy_pass.output_image.extent();
+        let groups = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
+        yuvy_pass.dispatch(&mut cmd_builder, cam_img, groups)?;
+        let output_image = yuvy_pass.output_image.clone();
+        let cmd = cmd_builder.build()?;
+
+        vulkano::sync::now(self.vk_context.device.clone())
+            .then_execute(self.vk_context.queue.clone(), cmd)?
+            .then_signal_fence_and_flush()?
+            .wait(None)?;
+
+        self.release(index)?;
+        Ok(output_image)
     }
 
     /// Returns the Camera config
@@ -406,6 +438,22 @@ impl AndroidCam<'_> {
 
 impl Drop for AndroidCam<'_> {
     fn drop(&mut self) {
+        // Each cached image was wrapped via `from_handle_borrowed` (to
+        // avoid a vulkano-internal memory-requirements query that panics
+        // on this hardware's opaque AHardwareBuffer-backed images), so it
+        // is not destroyed automatically — do it here, before `self.cache`
+        // drops its `DeviceMemory` entries (Vulkan requires destroying a
+        // bound resource before freeing its memory).
+        for frame in &self.cache {
+            unsafe {
+                (self.vk_context.device.fns().v1_0.destroy_image)(
+                    self.vk_context.device.handle(),
+                    frame.image.handle(),
+                    ptr::null(),
+                );
+            }
+        }
+
         unsafe {
             ffi::ACameraCaptureSession_stopRepeating(self.session);
             ffi::ACameraCaptureSession_close(self.session);
@@ -419,7 +467,10 @@ impl Drop for AndroidCam<'_> {
     }
 }
 
-unsafe extern "C" fn on_device_disconnected(_context: *mut c_void, _device: *mut ffi::ACameraDevice) {
+unsafe extern "C" fn on_device_disconnected(
+    _context: *mut c_void,
+    _device: *mut ffi::ACameraDevice,
+) {
     tracing::warn!("Camera device disconnected");
 }
 
@@ -439,20 +490,222 @@ fn check(status: ffi::camera_status_t, what: &str) -> Result<()> {
     }
 }
 
-fn find_host_visible_memory_type_index(
-    device: &Device,
-    requirements: MemoryRequirements,
-) -> Result<u32> {
-    let memory_properties = device.physical_device().memory_properties();
-    let required = MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT;
+fn vk_check(result: vk::Result, what: &str) -> Result<()> {
+    if result == vk::Result::SUCCESS {
+        Ok(())
+    } else {
+        bail!("{what} failed: {result:?}")
+    }
+}
 
-    memory_properties
-        .memory_types
-        .iter()
-        .enumerate()
-        .position(|(idx, ty)| {
-            (requirements.memory_type_bits & (1 << idx)) != 0 && ty.property_flags.contains(required)
+/// Imports `ahb`'s memory directly as a sampled Vulkan image — no CPU
+/// copy. Its pixel layout is opaque (vendor-defined), so vulkano's safe
+/// image/memory APIs can't express it: the `VkImage`/`VkDeviceMemory` are
+/// built with raw Vulkan calls and wrapped via vulkano's `from_handle`
+/// constructors.
+fn import_hardware_buffer(
+    device: &Arc<Device>,
+    ahb: &HardwareBuffer,
+) -> Result<(
+    Arc<Image>,
+    DeviceMemory,
+    vk::AndroidHardwareBufferFormatPropertiesANDROID<'static>,
+)> {
+    let ahb_ptr: *mut vk::AHardwareBuffer = ahb.as_ptr().cast();
+    let desc = ahb.describe();
+
+    let mut format_props = vk::AndroidHardwareBufferFormatPropertiesANDROID::default();
+    let (allocation_size, memory_type_bits) = {
+        let mut props =
+            vk::AndroidHardwareBufferPropertiesANDROID::default().push_next(&mut format_props);
+        vk_check(
+            unsafe {
+                (device
+                    .fns()
+                    .android_external_memory_android_hardware_buffer
+                    .get_android_hardware_buffer_properties_android)(
+                    device.handle(),
+                    ahb_ptr.cast_const(),
+                    &mut props,
+                )
+            },
+            "vkGetAndroidHardwareBufferPropertiesANDROID",
+        )?;
+        (props.allocation_size, props.memory_type_bits)
+    };
+
+    // vkCreateImage: `format` is UNDEFINED — the real (opaque) pixel
+    // layout is carried by `externalFormat` instead, which only a
+    // combined image sampler with a matching `VkSamplerYcbcrConversion`
+    // can read (confirmed by `format_props.format_features` reporting
+    // SAMPLED_IMAGE but no STORAGE_IMAGE support on this hardware).
+    let mut external_format_info =
+        vk::ExternalFormatANDROID::default().external_format(format_props.external_format);
+    let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
+        .handle_types(vk::ExternalMemoryHandleTypeFlags::ANDROID_HARDWARE_BUFFER_ANDROID);
+    let image_create_info_vk = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_2D)
+        .format(vk::Format::UNDEFINED)
+        .extent(vk::Extent3D {
+            width: desc.width,
+            height: desc.height,
+            depth: 1,
         })
-        .map(|idx| idx as u32)
-        .context("no host-visible, host-coherent memory type found for camera staging image")
+        .mip_levels(1)
+        .array_layers(1)
+        .samples(vk::SampleCountFlags::TYPE_1)
+        .tiling(vk::ImageTiling::OPTIMAL)
+        .usage(vk::ImageUsageFlags::SAMPLED)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .push_next(&mut external_memory_info)
+        .push_next(&mut external_format_info);
+
+    let mut image_handle = vk::Image::null();
+    vk_check(
+        unsafe {
+            (device.fns().v1_0.create_image)(
+                device.handle(),
+                &image_create_info_vk,
+                ptr::null(),
+                &mut image_handle,
+            )
+        },
+        "vkCreateImage",
+    )?;
+
+    let vk_create_info = ImageCreateInfo {
+        image_type: ImageType::Dim2d,
+        // The real `VkImage` was created with `format = UNDEFINED` (its
+        // actual layout is opaque, carried by `externalFormat`). Vulkano's
+        // own bookkeeping needs a format with a `Color` aspect to compute
+        // a non-empty subresource range (`Format::UNDEFINED` has none,
+        // which panics on an empty-range assertion) — a placeholder
+        // concrete format is fine here since nothing reads it back for
+        // GPU interpretation (the image view below hardcodes `UNDEFINED`
+        // explicitly, matching the real object).
+        format: Format::R8G8B8A8_UNORM,
+        extent: [desc.width, desc.height, 1],
+        usage: ImageUsage::SAMPLED,
+        tiling: ImageTiling::Optimal,
+        initial_layout: ImageLayout::Undefined,
+        external_memory_handle_types: ExternalMemoryHandleTypes::ANDROID_HARDWARE_BUFFER,
+        ..Default::default()
+    };
+    // SAFETY: `image_handle` was just created from `device` with a
+    // matching `ImageCreateInfo`, has no memory bound yet, and is
+    // destroyed manually in `AndroidCam::drop` (see there for why
+    // `from_handle`'s unconditional memory-requirements query can't be
+    // used here).
+    let raw_image =
+        unsafe { RawImage::from_handle_borrowed(device.clone(), image_handle, vk_create_info) }
+            .context("failed to wrap imported VkImage")?;
+
+    // vkAllocateMemory: import the AHardwareBuffer's memory, dedicated to
+    // the image just created.
+    let memory_type_index = (0..32)
+        .find(|i| (memory_type_bits & (1 << i)) != 0)
+        .context("no compatible memory type for AHardwareBuffer import")?;
+    let mut dedicated_alloc_info = vk::MemoryDedicatedAllocateInfo::default().image(image_handle);
+    let mut import_info = vk::ImportAndroidHardwareBufferInfoANDROID::default().buffer(ahb_ptr);
+    let alloc_info_vk = vk::MemoryAllocateInfo::default()
+        .allocation_size(allocation_size)
+        .memory_type_index(memory_type_index)
+        .push_next(&mut dedicated_alloc_info)
+        .push_next(&mut import_info);
+
+    let mut memory_handle = vk::DeviceMemory::null();
+    vk_check(
+        unsafe {
+            (device.fns().v1_0.allocate_memory)(
+                device.handle(),
+                &alloc_info_vk,
+                ptr::null(),
+                &mut memory_handle,
+            )
+        },
+        "vkAllocateMemory (AHardwareBuffer import)",
+    )?;
+    vk_check(
+        unsafe {
+            (device.fns().v1_0.bind_image_memory)(device.handle(), image_handle, memory_handle, 0)
+        },
+        "vkBindImageMemory",
+    )?;
+
+    // SAFETY: `memory_handle` was just allocated from `device` with the
+    // parameters mirrored below.
+    let device_memory = unsafe {
+        DeviceMemory::from_handle(
+            device.clone(),
+            memory_handle,
+            MemoryAllocateInfo {
+                allocation_size,
+                memory_type_index,
+                dedicated_allocation: Some(DedicatedAllocation::Image(&raw_image)),
+                ..Default::default()
+            },
+        )
+    };
+    // SAFETY: memory matching `raw_image`'s requirements was just bound
+    // to it above via `vkBindImageMemory`.
+    let vk_image = Arc::new(unsafe { raw_image.assume_bound() });
+
+    Ok((vk_image, device_memory, format_props))
+}
+
+/// Creates the `VkSamplerYcbcrConversion` needed to sample `externalFormat`
+/// images, using the YCbCr-identity model so a sample's `.g` component is
+/// raw luminance (per the Vulkan multi-planar format spec: G=Y, B=Cb,
+/// R=Cr) with no color-space matrix applied.
+fn create_ycbcr_conversion(
+    device: &Arc<Device>,
+    format_props: &vk::AndroidHardwareBufferFormatPropertiesANDROID,
+) -> Result<Arc<SamplerYcbcrConversion>> {
+    let mut external_format_info =
+        vk::ExternalFormatANDROID::default().external_format(format_props.external_format);
+    let create_info_vk = vk::SamplerYcbcrConversionCreateInfo::default()
+        .format(vk::Format::UNDEFINED)
+        .ycbcr_model(vk::SamplerYcbcrModelConversion::YCBCR_IDENTITY)
+        .ycbcr_range(vk::SamplerYcbcrRange::ITU_FULL)
+        .components(vk::ComponentMapping::default())
+        .x_chroma_offset(vk::ChromaLocation::COSITED_EVEN)
+        .y_chroma_offset(vk::ChromaLocation::COSITED_EVEN)
+        .chroma_filter(vk::Filter::LINEAR)
+        .force_explicit_reconstruction(false)
+        .push_next(&mut external_format_info);
+
+    let mut handle = vk::SamplerYcbcrConversion::null();
+    vk_check(
+        unsafe {
+            (device
+                .fns()
+                .khr_sampler_ycbcr_conversion
+                .create_sampler_ycbcr_conversion_khr)(
+                device.handle(),
+                &create_info_vk,
+                ptr::null(),
+                &mut handle,
+            )
+        },
+        "vkCreateSamplerYcbcrConversionKHR",
+    )?;
+
+    // SAFETY: `handle` was just created from `device`; the create info
+    // below mirrors what was passed to the raw call above (format left as
+    // `UNDEFINED` — the real format is `format_props.external_format`,
+    // which vulkano's `SamplerYcbcrConversionCreateInfo` cannot express).
+    Ok(unsafe {
+        SamplerYcbcrConversion::from_handle(
+            device.clone(),
+            handle,
+            SamplerYcbcrConversionCreateInfo {
+                format: Format::UNDEFINED,
+                ycbcr_model: SamplerYcbcrModelConversion::YcbcrIdentity,
+                ycbcr_range: SamplerYcbcrRange::ItuFull,
+                chroma_filter: vulkano::image::sampler::Filter::Linear,
+                ..Default::default()
+            },
+        )
+    })
 }

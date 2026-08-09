@@ -416,7 +416,7 @@ impl AndroidCam<'_> {
             CommandBufferUsage::OneTimeSubmit,
         )?;
         let extent = yuvy_pass.output_image.extent();
-        let groups = [extent[0].div_ceil(16), extent[1].div_ceil(16), 1];
+        let groups = compute_groups2D!(extent, 16);
         yuvy_pass.dispatch(&mut cmd_builder, cam_img, groups)?;
         let output_image = yuvy_pass.output_image.clone();
         let cmd = cmd_builder.build()?;

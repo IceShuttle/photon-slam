@@ -98,9 +98,8 @@ impl V4lCapture<'_> {
             negotiated.size,
         );
 
-        let pixel_format = match negotiated.fourcc {
-            _ => Format::B8G8R8G8_422_UNORM,
-        };
+        // Hardcoding format currently
+        let pixel_format = Format::B8G8R8G8_422_UNORM;
         let width = negotiated.width;
         let height = negotiated.height;
 

@@ -185,12 +185,7 @@ impl V4lCapture<'_> {
 
         // YUYV→R8 conversion pass. Any buffer's extent works here — all
         // `gpu_images` share the same format/extent.
-        let yuvy_pass = YuvyToR8Pass::new(
-            &vk_device,
-            &vk_context.memory_allocator,
-            gpu_images[0].clone(),
-            None,
-        )?;
+        let yuvy_pass = YuvyToR8Pass::new(vk_context, gpu_images[0].clone(), None)?;
 
         tracing::info!("CameraCapture instantiated");
 

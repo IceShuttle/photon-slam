@@ -1,21 +1,15 @@
+use super::common::*;
 use super::errors::ShaderDispatchError;
 use crate::vulkan::context::VulkanContext;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{
-        DescriptorSet, WriteDescriptorSet, allocator::StandardDescriptorSetAllocator,
+        allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
-    format::Format,
-    image::{Image, ImageCreateInfo, ImageType, ImageUsage, view::ImageView},
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
-    pipeline::{
-        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
-        compute::ComputePipelineCreateInfo,
-        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
-    },
-    shader::{ShaderModule, ShaderModuleCreateInfo, spirv::bytes_to_words},
+    image::{view::ImageView, Image},
+    pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
 };
 
 /// Compute pass that computes intensity-centroid orientation per pixel.
@@ -40,45 +34,12 @@ impl OrbPass {
         input_image: Arc<Image>,
         fast_output: Arc<Image>,
     ) -> Result<Self> {
-        let extent = input_image.extent();
-
-        // --- orientation output image ---
-        let output_image = Image::new(
-            ctx.memory_allocator.clone(),
-            ImageCreateInfo {
-                image_type: ImageType::Dim2d,
-                format: Format::R8G8B8A8_UNORM,
-                extent,
-                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                ..Default::default()
-            },
-        )?;
+        // --- response image (corner score per pixel) ---
+        let output_image = create_output_image(ctx, input_image.extent())?;
 
         // --- compile SPIR-V ---
         let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/orb.spv"));
-        let words = bytes_to_words(bytes).context("orb.spv length is not a multiple of 4")?;
-        let module =
-            unsafe { ShaderModule::new(ctx.device.clone(), ShaderModuleCreateInfo::new(&words)) }
-                .context("failed to create shader module from orb.spv")?;
-        let entry_point = module
-            .entry_point("main")
-            .context("orb.spv has no `main` entry point")?;
-        let stage = PipelineShaderStageCreateInfo::new(entry_point);
-        let layout = PipelineLayout::new(
-            ctx.device.clone(),
-            PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
-                .into_pipeline_layout_create_info(ctx.device.clone())?,
-        )?;
-        let pipeline = ComputePipeline::new(
-            ctx.device.clone(),
-            None,
-            ComputePipelineCreateInfo::stage_layout(stage, layout),
-        )
-        .context("failed to create ORB orientation compute pipeline")?;
+        let pipeline = create_pipeline(ctx, bytes, "Orb")?;
 
         // --- descriptor set ---
         // Binding 0: input luminance (Texture2D<float4>)

@@ -1,21 +1,15 @@
+use super::common::*;
 use super::errors::ShaderDispatchError;
 use crate::vulkan::context::VulkanContext;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::sync::Arc;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{
         allocator::StandardDescriptorSetAllocator, DescriptorSet, WriteDescriptorSet,
     },
-    format::Format,
-    image::{view::ImageView, Image, ImageCreateInfo, ImageType, ImageUsage},
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
-    pipeline::{
-        compute::ComputePipelineCreateInfo,
-        layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
-        ComputePipeline, Pipeline, PipelineBindPoint, PipelineShaderStageCreateInfo,
-    },
-    shader::{spirv::bytes_to_words, ShaderModule, ShaderModuleCreateInfo},
+    image::{view::ImageView, Image},
+    pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
 };
 
 /// Push constants for the FAST-9 shader.
@@ -40,45 +34,12 @@ impl FastPass {
     /// `input_image` is bound at set-0 binding-0; the internally-created
     /// response image is bound at set-0 binding-1.
     pub fn new(ctx: &VulkanContext, input_image: Arc<Image>) -> Result<Self> {
-        let extent = input_image.extent();
-
         // --- response image (corner score per pixel) ---
-        let output_image = Image::new(
-            ctx.memory_allocator.clone(),
-            ImageCreateInfo {
-                image_type: ImageType::Dim2d,
-                format: Format::R8_UNORM,
-                extent,
-                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                ..Default::default()
-            },
-        )?;
+        let output_image = create_output_image(ctx, input_image.extent())?;
 
         // --- compile SPIR-V ---
         let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/fast.spv"));
-        let words = bytes_to_words(bytes).context("fast.spv length is not a multiple of 4")?;
-        let module =
-            unsafe { ShaderModule::new(ctx.device.clone(), ShaderModuleCreateInfo::new(&words)) }
-                .context("failed to create shader module from fast.spv")?;
-        let entry_point = module
-            .entry_point("main")
-            .context("fast.spv has no `main` entry point")?;
-        let stage = PipelineShaderStageCreateInfo::new(entry_point);
-        let layout = PipelineLayout::new(
-            ctx.device.clone(),
-            PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
-                .into_pipeline_layout_create_info(ctx.device.clone())?,
-        )?;
-        let pipeline = ComputePipeline::new(
-            ctx.device.clone(),
-            None,
-            ComputePipelineCreateInfo::stage_layout(stage, layout),
-        )
-        .context("failed to create FAST-9 compute pipeline")?;
+        let pipeline = create_pipeline(ctx, bytes, "Fast")?;
 
         // --- descriptor set ---
         let ds_allocator = Arc::new(StandardDescriptorSetAllocator::new(

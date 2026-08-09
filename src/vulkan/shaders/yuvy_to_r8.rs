@@ -1,6 +1,6 @@
-use vulkano::device::{Device, DeviceOwned};
 use anyhow::{Context, Result};
 use std::sync::Arc;
+use vulkano::device::DeviceOwned;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
     descriptor_set::{
@@ -12,9 +12,8 @@ use vulkano::{
             ycbcr::SamplerYcbcrConversion, ComponentMapping, Filter, Sampler, SamplerCreateInfo,
         },
         view::{ImageView, ImageViewCreateInfo},
-        Image, ImageAspects, ImageCreateInfo, ImageSubresourceRange, ImageType, ImageUsage,
+        Image, ImageAspects, ImageSubresourceRange, ImageUsage,
     },
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator},
     pipeline::{
         compute::ComputePipelineCreateInfo,
         layout::{PipelineDescriptorSetLayoutCreateInfo, PipelineLayout},
@@ -22,6 +21,10 @@ use vulkano::{
     },
     shader::{spirv::bytes_to_words, ShaderModule, ShaderModuleCreateInfo},
 };
+
+use crate::vulkan::context::VulkanContext;
+
+use super::common::create_output_image;
 
 /// Compute pass that extracts luminance from a camera image.
 ///
@@ -58,8 +61,7 @@ impl YuvyToR8Pass {
     /// Android (derived from the imported hardware buffer's format
     /// properties) and `None` on Linux.
     pub fn new(
-        device: &Arc<Device>,
-        memory_allocator: &Arc<StandardMemoryAllocator>,
+        ctx: &VulkanContext,
         camera_image: Arc<Image>,
         ycbcr_conversion: Option<Arc<SamplerYcbcrConversion>>,
     ) -> Result<Self> {
@@ -71,29 +73,19 @@ impl YuvyToR8Pass {
             None => [extent[0] * 2, extent[1], extent[2]],
         };
 
-        let output_image = Image::new(
-            memory_allocator.clone(),
-            ImageCreateInfo {
-                image_type: ImageType::Dim2d,
-                format: Format::R8_UNORM,
-                extent: output_extent,
-                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC | ImageUsage::SAMPLED,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                ..Default::default()
-            },
-        )?;
+        let output_image = create_output_image(ctx, output_extent)?;
 
         // --- compile SPIR-V ---
         let bytes = match &ycbcr_conversion {
-            Some(_) => include_bytes!(concat!(env!("OUT_DIR"), "/android_yuvy_to_r8.spv")).as_slice(),
+            Some(_) => {
+                include_bytes!(concat!(env!("OUT_DIR"), "/android_yuvy_to_r8.spv")).as_slice()
+            }
             None => include_bytes!(concat!(env!("OUT_DIR"), "/yuvy_to_r8.spv")).as_slice(),
         };
-        let words = bytes_to_words(bytes).context("yuvy_to_r8 shader length is not a multiple of 4")?;
+        let words =
+            bytes_to_words(bytes).context("yuvy_to_r8 shader length is not a multiple of 4")?;
         let module =
-            unsafe { ShaderModule::new(device.clone(), ShaderModuleCreateInfo::new(&words)) }
+            unsafe { ShaderModule::new(ctx.device.clone(), ShaderModuleCreateInfo::new(&words)) }
                 .context("failed to create shader module for yuvy_to_r8")?;
         let entry_point = module
             .entry_point("main")
@@ -106,7 +98,7 @@ impl YuvyToR8Pass {
         // sampler YCbCr conversions can't be set per-descriptor-write.
         if let Some(conversion) = &ycbcr_conversion {
             let sampler = Sampler::new(
-                device.clone(),
+                ctx.device.clone(),
                 SamplerCreateInfo {
                     mag_filter: Filter::Linear,
                     min_filter: Filter::Linear,
@@ -123,18 +115,18 @@ impl YuvyToR8Pass {
         }
 
         let layout = PipelineLayout::new(
-            device.clone(),
-            layout_info.into_pipeline_layout_create_info(device.clone())?,
+            ctx.device.clone(),
+            layout_info.into_pipeline_layout_create_info(ctx.device.clone())?,
         )?;
         let pipeline = ComputePipeline::new(
-            device.clone(),
+            ctx.device.clone(),
             None,
             ComputePipelineCreateInfo::stage_layout(stage, layout),
         )
         .context("failed to create YUVY-to-R8 compute pipeline")?;
 
         let ds_allocator = Arc::new(StandardDescriptorSetAllocator::new(
-            device.clone(),
+            ctx.device.clone(),
             Default::default(),
         ));
 

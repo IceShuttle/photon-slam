@@ -30,7 +30,10 @@
 //!    the memory stays valid after the `AImage` is gone.
 
 use super::CameraConfig;
-use crate::vulkan::{context::VulkanContext, shaders::yuvy_to_r8::YuvyToR8Pass};
+use crate::{
+    compute_groups2D,
+    vulkan::{context::VulkanContext, shaders::yuvy_to_r8::YuvyToR8Pass},
+};
 use anyhow::{bail, Context, Result};
 use ash::vk;
 use ndk::{
@@ -402,8 +405,7 @@ impl AndroidCam<'_> {
 
         if self.yuvy_pass.is_none() {
             self.yuvy_pass = Some(YuvyToR8Pass::new(
-                &self.vk_context.device,
-                &self.vk_context.memory_allocator,
+                &self.vk_context,
                 cam_img.clone(),
                 self.ycbcr_conversion.clone(),
             )?);

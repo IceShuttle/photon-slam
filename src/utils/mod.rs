@@ -4,13 +4,10 @@ pub mod camera;
 /// Does tracing stuff
 pub mod tracing;
 
-#[macro_export]
-macro_rules! compute_groups2D {
-    ($extent:expr,$grp_size:expr) => {
-        [
-            $extent[0].div_ceil($grp_size),
-            $extent[1].div_ceil($grp_size),
-            1,
-        ]
-    };
+pub const fn compute_groups_2d(extent: [u32; 3], group_size: u32) -> [u32; 3] {
+    [
+        extent[0].div_ceil(group_size),
+        extent[1].div_ceil(group_size),
+        1,
+    ]
 }

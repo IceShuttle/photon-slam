@@ -31,7 +31,7 @@
 
 use super::CameraConfig;
 use crate::{
-    compute_groups2D,
+    utils::compute_groups2D,
     vulkan::{context::VulkanContext, shaders::yuvy_to_r8::YuvyToR8Pass},
 };
 use anyhow::{bail, Context, Result};
@@ -418,7 +418,7 @@ impl AndroidCam<'_> {
             CommandBufferUsage::OneTimeSubmit,
         )?;
         let extent = yuvy_pass.output_image.extent();
-        let groups = compute_groups2D!(extent, 16);
+        let groups = compute_groups2D(extent, 16);
         yuvy_pass.dispatch(&mut cmd_builder, cam_img, groups)?;
         let output_image = yuvy_pass.output_image.clone();
         let cmd = cmd_builder.build()?;

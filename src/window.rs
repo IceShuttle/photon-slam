@@ -1,8 +1,7 @@
 use crate::{
-    compute_groups2D,
     fps::FpsCounter,
     trace_return,
-    utils::camera::CameraConfig,
+    utils::{camera::CameraConfig, compute_groups_2d},
     vulkan::{
         context::VulkanContext,
         disp::RenderContext,
@@ -130,7 +129,7 @@ impl ApplicationHandler for App<'_> {
 
                 // 2. FAST-9: corner detection on luminance.
                 let fast_extent = self.fast_pass.output_image.extent();
-                let fast_groups = compute_groups2D!(fast_extent, 16);
+                let fast_groups = compute_groups_2d(fast_extent, 16);
                 self.fast_pass
                     .dispatch(
                         &mut process_cmd_builder,
@@ -141,7 +140,7 @@ impl ApplicationHandler for App<'_> {
 
                 // 3. ORB: orientation at FAST corner locations.
                 let orb_extent = self.orb_pass.output_image.extent();
-                let orb_groups = compute_groups2D!(orb_extent, 16);
+                let orb_groups = compute_groups_2d(orb_extent, 16);
                 self.orb_pass
                     .dispatch(&mut process_cmd_builder, orb_groups)
                     .unwrap();

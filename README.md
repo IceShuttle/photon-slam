@@ -136,9 +136,7 @@ was working correctly.
 - native x86~64~ Linux (`photon-slam`)
 - arm64 Linux (`arm64-photon-slam`, cross toolchain)
 - Android arm64 via `androidenv`, SDK `min_sdk_version = 33` pinned to
-  `target_sdk_version = 30` because the flake\'s bundled SDK only ships
-  `android-30`\'s `aapt~/~android.jar`  documented directly in
-  `Cargo.toml` rather than left as a mystery version pin.
+  `target_sdk_version = 30`.
 
 The payoff of doing this in Nix instead of a shell script: the same
 `slangc` + Vulkan SDK + Android NDK versions are pinned for every

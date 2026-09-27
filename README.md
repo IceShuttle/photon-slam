@@ -4,6 +4,9 @@ This project currently stands as more of a proof of concept that it can
 run an aribitrary compute shader on a camera frame with zero copy than
 an actual SLAM/VIO,which I plan to implment eventually in the future.
 
+# Demo Video
+https://github.com/user-attachments/assets/0d93534c-6414-4732-b3de-6e31f814698d
+
 # How to run
 
 ## Linux
